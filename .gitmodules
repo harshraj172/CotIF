@@ -1,3 +1,6 @@
 [submodule "CotIF/src/finetune/axolotl"]
 	path = CotIF/src/finetune/axolotl
 	url = https://github.com/axolotl-ai-cloud/axolotl
+[submodule "src/LLaMA-Factory"]
+	path = src/LLaMA-Factory
+	url = https://github.com/hiyouga/LLaMA-Factory.git
