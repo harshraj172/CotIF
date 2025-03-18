@@ -90,7 +90,7 @@ def tokenize_with_assistant_continuation(tokenizer, messages):
   if not messages: return ""
   return tokenizer.apply_chat_template(messages, tokenize=False)[:-len(tokenizer.assistant_ending)]
 
-def check_constraints(text):
+def check_constraints(text, num_returns=5):
 
     def count_sentences(text):
         sentences = re.split(r'(?<=[.!?])\s+', text)
@@ -479,7 +479,21 @@ def check_constraints(text):
     }
 
     # Return a random sample of 5 checks for brevity
-    selected_keys = random.sample(list(checks.keys()), 5)
-    results = {key: checks[key] for key in selected_keys}
+    # Return a random sample of num_returs checks for brevity
+    # You should have more positive checks than negative checks
+    shuff_keys, results = list(checks.keys()), {}
+    random.shuffle(shuff_keys)
+    num_neg = random.randint(0, 2) 
+    num_pos = num_returns - num_neg
+    for key in shuff_keys:
+        if num_neg > 0 and (not checks[key] or checks[key]==0):
+            results[key] = checks[key]
+            num_neg -= 1
+        if num_pos > 0 and (checks[key] or checks[key] > 0):
+            results[key] = checks[key]
+            num_pos -= 1
+            
+    # selected_keys = random.sample(list(checks.keys()), 5)
+    # results = {key: checks[key] for key in selected_keys}
 
     return results

@@ -14,33 +14,47 @@ def main(dataset, LLM_model, LLM_tokenizer, batch_size=20):
         subset = dataset.select(range(i, i + batch_size))
         for datum in subset:
             constraints = check_constraints(datum['response'].split("</think>", 1)[0])
-            batch.append(tokenize_with_assistant_continuation(LLM_tokenizer, [{'role': 'user', 'content': f'''Given the below question and some structural constraints which should be present in the answer, like the number of times a word should be used, the number of sentences, or punctuation, etc. Write the constraint in the form of an question.
+#             batch.append(tokenize_with_assistant_continuation(LLM_tokenizer, [{'role': 'user', 'content': f'''Given the below question and some structural constraints which should be present in the answer, like the number of times a word should be used, the number of sentences, or punctuation, etc. Write the constraint in the form of an question.
+
+# ==EXAMPLE==
+# ### Question: Arrange all the numbers from the list [12, 18, 36, 9] to obtain 5 using arithmetic operations such as ×, ÷, +, and -.  
+# ### Constraints:  
+# - The solution must be presented in exactly **three paragraphs**.  
+# - Once the final answer is reached, do not verify or re-check it.  
+# ### Constrained Question:  
+# Arrange all the numbers from the list [12, 18, 36, 9] to obtain 5 using arithmetic operations such as ×, ÷, +, and -. Your thought process (between <think> and <\think>) should strictly adhere to the **three-paragraph** format. Ensure that you **stop immediately** once the answer is reached and do **not** verify or re-check it afterward.
+
+# NOTE: The question will be given to an AI assistant, which will perform a chain of thought before producing the final answer. Therefore, the modified question should always remind the AI to adhere to the given constraints while performing CoT.
+
+# ===
+# ### Question: {datum['instruction']}
+# ### Constraints: {constraints}
+# Now, provide the revised question without any commentary.
+# Note: The question should subtly incorporate the constraints. DO NOT answer the question just provide the modified question'''}, {'role': 'assistant', 'content': '### Constrained Question:'}]))
+
+            batch.append(tokenize_with_assistant_continuation(LLM_tokenizer, [{'role': 'user', 'content': f'''Given below the structural constraints which should be present in a response, like the number of times a word should be used, the number of sentences, or punctuation, etc. Write the constraint in the form of an instruction.
 
 ==EXAMPLE==
-### Question: Arrange all the numbers from the list [12, 18, 36, 9] to obtain 5 using arithmetic operations such as ×, ÷, +, and -.  
 ### Constraints:  
 - The solution must be presented in exactly **three paragraphs**.  
 - Once the final answer is reached, do not verify or re-check it.  
-### Constrained Question:  
-Arrange all the numbers from the list [12, 18, 36, 9] to obtain 5 using arithmetic operations such as ×, ÷, +, and -. Your thought process (between <think> and <\think>) should strictly adhere to the **three-paragraph** format. Ensure that you **stop immediately** once the answer is reached and do **not** verify or re-check it afterward.
+### Constrained Instruction:  
+Your thought process (between <think> and <\think>) should strictly adhere to the **three-paragraph** format. Ensure that you **stop immediately** once the answer is reached and do **not** verify or re-check it afterward.
 
-NOTE: The question will be given to an AI assistant, which will perform a chain of thought before producing the final answer. Therefore, the modified question should always remind the AI to adhere to the given constraints while performing CoT.
+NOTE: The question will be given to an AI assistant, which will perform chain of thought reasoning before producing the final response. Therefore, the modified question should always remind the AI to adhere to the given constraints while performing CoT.
 
 ===
-### Question: {datum['instruction']}
-### Constraints: {constraints}
-Now, provide the revised question without any commentary.
-Note: The question should subtly incorporate the constraints. DO NOT answer the question just provide the modified question'''}, {'role': 'assistant', 'content': '### Constrained Question:'}]))
+### Constraints: {constraints}'''}, {'role': 'assistant', 'content': '### Constrained Instruction:'}]))
             
         modified_instructions = generate_with_batching(LLM_model, LLM_tokenizer, batch, skip_special_tokens=True, batch_size=len(subset), return_continuations_only=True , dont_decode_non_english=True)
         
         batch_conversations = []
         for datum, modified_instruction in zip(subset, modified_instructions): 
             batch_conversations.append([
-                {"role": "user", "content": modified_instruction.replace('assistant:', '').replace('Assistant:', '').replace('assistant', '').replace('Assistant', '')}, 
+                {"role": "user", "content": f'{modified_instruction.replace("assistant:", "").replace("Assistant:", "").replace("assistant", "").replace("Assistant", "").replace("### Constraints:", "")}\n\nNow answer this question: {datum["instruction"]}'}, 
                 {"role": "assistant", "content": datum["response"]}
             ])
-        save_jsonl(batch_conversations, f"/share/u/harshraj/r1helpers/data/instr_in_thought/data_1k.jsonl", append=True)
+        save_jsonl(batch_conversations, f"data/data_1k-2.jsonl", append=True)
 
 if __name__ == "__main__": 
     LLM_model = AutoModelForCausalLM.from_pretrained("/share/u/models/meta-llama/Llama-3.1-8B-Instruct", device_map="auto")
