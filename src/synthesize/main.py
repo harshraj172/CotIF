@@ -1,12 +1,24 @@
+import argparse
 from tqdm.auto import tqdm
 
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from src.synthesize.utils import save_jsonl, check_constraints, tokenize_with_assistant_continuation, generate_with_batching
+from src.synthesize.utils import save_jsonl, check_constraints, \
+    tokenize_with_assistant_continuation, generate_with_batching, \
+    append_constraints_to_question, constraint_templates
 
 
-def main(dataset, LLM_model, LLM_tokenizer, batch_size=20):
+def using_template(dataset):
+    modified_instructions = []
+    for datum in tqdm(dataset, desc="Processing dataset (using templates)"):
+        constraints = check_constraints(datum['response'].split("</think>", 1)[0])
+        modified_instruction = append_constraints_to_question(datum['instruction'], constraints, constraint_templates)
+        modified_instructions.append(modified_instruction)
+        save_jsonl(modified_instructions[:int(0.9 * len(modified_instructions))], f"data/data_1k-using_templates-train-1.jsonl", append=True)
+        save_jsonl(modified_instructions[int(0.9 * len(modified_instructions)):], f"data/data_1k-using_templates-test-1.jsonl", append=True)
+            
+def using_LLM(dataset, LLM_model, LLM_tokenizer, batch_size=20):
     # print("dataset:",dataset)
     # conversations = []
     for i in tqdm(range(0, len(dataset), batch_size), desc="Processing dataset in batches"):
@@ -54,13 +66,25 @@ NOTE: The question will be given to an AI assistant, which will perform chain of
                 {"role": "user", "content": f'{modified_instruction.replace("assistant:", "").replace("Assistant:", "").replace("assistant", "").replace("Assistant", "").replace("### Constraints:", "")}\n\nNow answer this question: {datum["instruction"]}'}, 
                 {"role": "assistant", "content": datum["response"]}
             ])
-        save_jsonl(batch_conversations, f"data/data_1k-2.jsonl", append=True)
+        save_jsonl(batch_conversations, f"data/data_1k-using_LLMs-2.jsonl", append=True)
 
 if __name__ == "__main__": 
-    LLM_model = AutoModelForCausalLM.from_pretrained("/share/u/models/meta-llama/Llama-3.1-8B-Instruct", device_map="auto")
-    LLM_tokenizer = AutoTokenizer.from_pretrained("/share/u/models/meta-llama/Llama-3.1-8B-Instruct")
-    LLM_tokenizer.pad_token = LLM_tokenizer.eos_token
+    parser = argparse.ArgumentParser(description="Data Synthesis for CotIF")
+    parser.add_argument(
+        "--method",
+        type=str,
+        default="template",
+        choices=["template", "llm"],
+    )
+    args = parser.parse_args()
+    
     dataset = load_dataset("Magpie-Align/Magpie-Reasoning-V2-250K-CoT-Deepseek-R1-Llama-70B")
-    dataset = dataset["train"].select(range(1000))
-    print("Starting data creation...")
-    main(dataset, LLM_model, LLM_tokenizer)
+    dataset = dataset["train"].select(range(6000))
+        
+    if args.method=="llm":
+        LLM_model = AutoModelForCausalLM.from_pretrained("/share/u/models/meta-llama/Llama-3.1-8B-Instruct", device_map="auto")
+        LLM_tokenizer = AutoTokenizer.from_pretrained("/share/u/models/meta-llama/Llama-3.1-8B-Instruct")
+        LLM_tokenizer.pad_token = LLM_tokenizer.eos_token
+        using_LLM(dataset, LLM_model, LLM_tokenizer)
+    elif args.method=="template":
+        using_template(dataset)
