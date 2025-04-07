@@ -1,18 +1,25 @@
-import os 
 import re 
-import uuid
 import json
 import random
-from tqdm.auto import tqdm
-
-import nltk
-# nltk.data.path.append('./nltk_data')
-from nltk.corpus import wordnet
-from string import punctuation, ascii_lowercase
-from nltk.corpus import stopwords, cmudict, words as nltk_words
-from nltk import pos_tag, word_tokenize
+from collections import Counter
 
 import torch
+
+import wn 
+import spacy 
+from string import punctuation
+from spacy.lang.en import stop_words
+
+
+spacy_nlp = spacy.load('en_core_web_sm')
+en_wn = wn.Wordnet('omw-en')
+
+numbering_list = ['3', '7)', '7.', '4', 'iii.', 'iii-', '8.', '4-', 'v:', 'I:', 'ii.', 'i.', 'V)', 'E)', 'I)', 'III.', 'III)', '2-', '1)', 'v-', 'III', 'I.', 'c)', '1.', 'V-', 'iv)', 'A)', 'v)', 'IV', 'C.', 'ii)', 'I', 'IV.', 'C)', 'II-', '2.', 'III-', 'IV)', 'd)', 'iii', 'i-', 'iii:', 'A.', 'B.', '1', '6)', 'ii', '8)', '3)', 'e)', 'ii-', '5-', 'II)', 'iv-', '2)', 'e.', 'IV:', 'III:', 'i)', '10.', 'V', 'V.', 'v.', 'D)', 'E.', 'iv:', 'B)', 'II', 'ii:', 'V:', 'a.', '5.', 'IV-', '9.', 'D.', '3.', '4:', '2:', 'i', 'II.', '3-', '2', 'c.', 'a)', '3:', '10)', 'd.', 'i:', 'iv.', '1-', '4.', '5', 'iv', 'iii)', 'b.', '1:', 'II:', 'v', '5:', '6.', 'b)', 'I-', '9)', '4)', '5)']
+
+stopwords_list = ['es', 'ing', 'ed', 'include', 'includes', 'also', 'haven', 'are', 'why', 'most', "won't", 'against', 'with', 'needn', 'couldn', 'now', 'mustn', 'who', 'under', 'doing', 'am', 'aren', 'they', "didn't", 'd', 'doesn', 'if', 'he', 'her', "haven't", 'isn', 'own', 'does', 'such', 'until', 'into', 'had', 'again', 'over', "hadn't", "you'll", 't', 'by', 'be', "wasn't", 'so', 'yours', 'both', 'any', 'did', "you've", 'these', 'myself', 'o', 'hasn', "isn't", 'you', 'other', 'shan', 'being', 'yourselves', 'was', 'no', 'm', 'those', 'will', 'its', 'itself', 'have', 'down', 'weren', 'having', 'wouldn', 'herself', "mustn't", 'very', 'do', "should've", 'him', "you'd", 'below', 'just', 'that', 'for', 'which', 'but', 'nor', 'all', 'then', 'i', 'whom', 'it', 'once', 'here', 've', "you're", 'ours', "that'll", 'a', 'won', 'himself', 'where', 'this', 'your', "hasn't", 'same', 'when', 'ourselves', 'because', "needn't", 'theirs', 'from', 'mightn', 'my', 'while', 'yourself', "she's", 'each', "doesn't", 'only', 'at', 's', 'their', "wouldn't", 'shouldn', 'and', 'themselves', 'hers', 'has', 'up', 'ma', 'in', 'll', 'we', 're', 'y', 'of', 'after', 'our', "shan't", 'before', 'wasn', 'can', 'should', 'been', 'through', 'as', 'further', 'during', 'between', 'there', 'me', 'on', 'don', "shouldn't", 'more', 'out', "don't", 'the', "weren't", "aren't", "it's", 'what', 'or', "couldn't", 'hadn', "mightn't", 'his', 'above', 'to', 'how', 'few', 'off', 'them', 'didn', 'ain', 'not', 'she', 'an', 'than', 'too', 'is', 'some', 'were', 'about']
+
+common_title_words_set = {'introduction', 'conclusion', 'section', 'chapter', 'works', 'notes', 'note', 'further', 'see', 'references', 'reference', 'section', 'title', 'conclusion', 'intro', 'introduction', 'executive', 'summary', 'key', 'plot', 'theme'}
+stopwords_set = set(stopwords_list + numbering_list)
 
 
 def load_jsonl(file_path):
@@ -90,189 +97,70 @@ def tokenize_with_assistant_continuation(tokenizer, messages):
   if not messages: return ""
   return tokenizer.apply_chat_template(messages, tokenize=False)[:-len(tokenizer.assistant_ending)]
 
-def check_constraints(text, num_returns=3):
+
+def strip_left_stopwords(e_text):
+  """
+  Removes common stopwords from the left side of a text until a significant word is found.
+
+  Args:
+      e_text (str): The text to strip from the left side.
+
+  Returns:
+      str: Text with left-side stopwords removed.
+  """
+  e_text2 = []
+  add_rest = False
+  for et in e_text.split():
+      if add_rest or ((et.lower() not in stopwords_set and et.lower() not in common_title_words_set) or et.lower().strip(".") in {"a", "an", "united", "the", "new", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",  "asian", "american", "african", "european", }):
+        add_rest = True
+        e_text2.append(et)
+  return " ".join(e_text2)
+
+
+def check_constraints(text):
+    global spacy_nlp, en_wn
+    
+    def generate_ngrams(tokens, n=4):
+        return [tokens[i:i+n] for i in range(len(tokens)-n+1)]
 
     def count_sentences(text):
         sentences = re.split(r'(?<=[.!?])\s+', text)
         return len([s.strip() for s in sentences if s.strip()])
     
-    def count_words_starting_with(text, letter):
-        words = text.split()
-        return sum(1 for word in words if word.lower().startswith(letter.lower()))
+    def repeated_sentences(text):
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        sents = Counter([s.strip() for s in sentences if s.strip()]) 
+        return dict([ab for ab in sents.items() if ab[1] > 1])
     
-    def count_palindromes(text):
+    def palindromes(text):
         words = text.split()
-        return sum(
-            1
+        return [
+            word.strip(punctuation)
             for word in words
-            if word.strip(punctuation).lower() == word.strip(punctuation).lower()[::-1]
-        )
-    
-    def count_double_letters(text):
-        words = text.split()
-        return sum(
-            1
-            for word in words
-            if any(word[i] == word[i + 1] for i in range(len(word) - 1))
-        )
-    
-    def has_emojis(text):
-        def is_emoji(char):
-            emoji_ranges = [
-                (0x1F600, 0x1F64F),
-                (0x1F300, 0x1F5FF),
-                (0x1F680, 0x1F6FF),
-                (0x2600, 0x26FF),
-                (0x2700, 0x27BF),
-                (0xFE00, 0xFE0F),
-                (0x1F900, 0x1F9FF),
-                (0x1F1E6, 0x1F1FF),
-            ]
-            return any(start <= ord(char) <= end for start, end in emoji_ranges)
-        
-        return any(is_emoji(char) for char in text)
-
-    def contains_numbers(text):
-        return any(char.isdigit() for char in text)
-    
-    def contains_punctuation(text):
-        return any(char in punctuation for char in text)
-    
+            if len(word.strip(punctuation)) > 3 and word.strip(punctuation).lower() == word.strip(punctuation).lower()[::-1]
+        ]
     def uppercase_word_count(text):
         return sum(1 for word in text.split() if word.isupper())
 
-    def contains_repeated_words(text):
+    def count_ngram_repetitions(text):
         words = text.lower().split()
-        return not all(words[i] != words[i + 1] for i in range(len(words) - 1))
-    
-    def max_word_repeats(text):
-        words = text.lower().split()
-        word_counts = {word: words.count(word) for word in set(words)}
-        return max(word_counts.values()) if word_counts else 0
-    
-    def contains_special_characters(text):
-        return any(char in """!@#$%^&*()_+=-{}[]|:;"'<>,/""" for char in text)
-    
-    def starts_with_letter(text, letter):
-        sentences = [s.strip() for s in re.split(r'[.!?]', text) if s.strip()]
-        return all(sentence.lower().startswith(letter.lower()) for sentence in sentences if sentence)
+        ngrams = Counter([" ".join(a) for a in generate_ngrams(words, 5) + \
+                         generate_ngrams(words, 6) + \
+                          generate_ngrams(words, 7) + \
+                          generate_ngrams(words, 8)]) 
+                                
+        return dict([ab for ab in ngrams.items() if ab[1] > 1])
 
-    def contains_question(text):
-        return '?' in text
-    
-    def contains_exclamation(text):
-        return '!' in text
-
-    def sentence_length_variability(text):
-        sentences = [s.strip() for s in re.split(r'[.!?]', text) if s.strip()]
-        lengths = [len(s.split()) for s in sentences]
-        return max(lengths) - min(lengths) if lengths else 0
-
-    def count_uncommon_words(text):
-        common_words = set(["the", "and", "is", "in", "to", "of", "a", "that", "it", "on", "for", "this", "with"])
-        words = text.lower().split()
-        return sum(1 for word in words if word not in common_words and len(word) > 5)
-
-    def count_common_word_overuse(text):
-        words = text.lower().split()
-        common_counts = {word: words.count(word) for word in words if word in ["the", "and", "is", "of", "to", "a"]}
-        return max(common_counts.values()) if common_counts else 0
-
-    def count_ngram_repetitions(text, n=3):
-        words = text.lower().split()
-        ngrams = [" ".join(words[i:i+n]) for i in range(len(words)-n+1)]
-        return sum(1 for ngram in set(ngrams) if words.count(ngram) > 1)
-
-    def contains_contradictions(text):
-        contradiction_patterns = [
-            r"\bbut\b", 
-            r"\bhowever\b", 
-            r"\bon the other hand\b", 
-            r"\byet\b", 
-            r"\balthough\b"
-        ]
-        return any(re.search(pattern, text, re.IGNORECASE) for pattern in contradiction_patterns)
-
-    def contains_rhetorical_questions(text):
-        return bool(re.search(r"\b(isn\'t it|don\'t you think|is that right|right\?)\b", text, re.IGNORECASE))
-
-    def contains_excessive_parentheses(text):
-        return text.count("(") + text.count(")") > 4
-
-    def contains_excessive_adverbs(text):
-        adverbs = ["really", "very", "actually", "absolutely", "seriously", "extremely", "totally", "literally"]
-        return sum(text.lower().count(adverb) for adverb in adverbs) > 5
-
-    def contains_excessive_nominalization(text):
-        nominalizations = ["tion", "ment", "ness", "ity", "ism", "ance"]
-        words = text.split()
-        return sum(1 for word in words if any(word.endswith(suffix) for suffix in nominalizations)) > 5
-
-    def contains_excessive_passive_voice(text):
-        passive_patterns = [r"\b(is|was|were|been|being) [a-z]+ed\b"]
-        return any(re.search(pattern, text, re.IGNORECASE) for pattern in passive_patterns)
-
-    def lacks_pronouns(text):
-        pronouns = ["he", "she", "it", "they", "we", "you", "i"]
-        return not any(word in text.lower().split() for word in pronouns)
-
-    def contains_hedging_language(text):
-        hedging_words = ["might", "maybe", "perhaps", "possibly", "could", "would", "seem"]
-        return any(word in text.lower().split() for word in hedging_words)
-
-    def contains_hyperbole(text):
-        hyperbole_patterns = [
-            r"\balways\b",
-            r"\bnever\b",
-            r"\bthe best\b",
-            r"\bthe worst\b",
-            r"\bunbelievable\b",
-            r"\bincredible\b",
-            r"\babsolutely amazing\b"
-        ]
-        return any(re.search(pattern, text, re.IGNORECASE) for pattern in hyperbole_patterns)
-
-    def contains_repetitive_sentence_structures(text):
-        sentences = [s.strip() for s in re.split(r'[.!?]', text) if s.strip()]
-        return len(set(len(s.split()) for s in sentences)) < 3
 
     def contains_list_or_enumeration(text):
-        return bool(re.search(r"\b(first|second|third|one|two|three|1\.|2\.|3\.)\b", text, re.IGNORECASE))
-
-    STOPWORDS = set(stopwords.words('english'))
-
-    def count_words_ending_in_x(text):
-        words = word_tokenize(text)
-        return sum(
-            1
-            for w in words
-            if w.isalpha()
-            and w.lower() not in STOPWORDS
-            and w.lower().endswith('x')
-        )
-
-    def count_words_starting_in_x(text):
-        words = word_tokenize(text)
-        return sum(
-            1
-            for w in words
-            if w.isalpha()
-            and w.lower() not in STOPWORDS
-            and w.lower().startswith('x')
-        )
-
+        return (re.match(r"\b(first|second|third|one|two|three|1\.|2\.|3\.)\b", text, re.IGNORECASE))
+    
     def analyze_nouns_common_hypernyms(text):
-        tokens = word_tokenize(text)
-        tagged = pos_tag(tokens)
-        candidate_nouns = []
-        for (word_, tag_) in tagged:
-            if tag_.startswith('NN') and word_.lower() not in STOPWORDS:
-                candidate_nouns.append(word_.lower())
-
-        candidate_nouns = list(set(candidate_nouns))
+        doc = spacy_nlp(text)
+        candidate_nouns = [strip_left_stopwords(e.text)  for e in doc.noun_chunks if len(e.text) > 4 and e.text.lower() not in stopwords_set]        
         noun_synsets = {}
         for noun in candidate_nouns:
-            syns = wordnet.synsets(noun, pos=wordnet.NOUN)
+            syns = en_wn.synsets(noun, "n")
             if syns:
                 noun_synsets[noun] = syns[0]
 
@@ -285,8 +173,10 @@ def check_constraints(text, num_returns=3):
                 lch = syn_i.lowest_common_hypernyms(syn_j)
                 if lch:
                     for common_hyp in lch:
-                        if common_hyp.name() != "entity.n.01":
-                            hypernym_map.setdefault(common_hyp.name(), set()).update([noun_list[i], noun_list[j]])
+                        name = common_hyp.lemmas()[0]
+                        if name in {"act", "whole", "communication", "thing", "content", "group", "social group", "unit", "organism", "region", "area", "geographic point", "relation", "attribute", "happening", "action", "entity", "causal agent", 'administrative district', "abstraction", "object", "point", "event", "physical entity", "matter", "part", "person", "state"}:
+                            continue
+                        hypernym_map.setdefault(name, set()).update([noun_list[i], noun_list[j]])
         
         hypernym_map = {
             hyp: list(nset) for hyp, nset in hypernym_map.items() if len(nset) >= 2
@@ -297,10 +187,6 @@ def check_constraints(text, num_returns=3):
     def count_paragraphs(text):
         paras = [p.strip() for p in text.split('\n') if p.strip()]
         return len(paras)
-
-    def paragraphs_start_with_letter(text, letter):
-        paras = [p.strip() for p in text.split('\n') if p.strip()]
-        return all(p.lower().startswith(letter.lower()) for p in paras)
 
     def consecutive_alliterative_words(text, n=4):
         words = text.lower().split()
@@ -321,46 +207,23 @@ def check_constraints(text, num_returns=3):
         return syllable_counts == [5, 7, 5]
 
     def hidden_acrostic(text, length=5):
-        first_letters = [s[0].lower() for s in text.split('.') if s.strip()]
-        return any(
-            ''.join(first_letters[i:i+length]) in nltk_words.words()
-            for i in range(len(first_letters)-length+1)
-        )
+        first_letters = "".join([s.strip()[0].lower() for s in text.split('.') if s.strip()])
+        for word in generate_ngrams(first_letters, 6):
+            syns = en_wn.synsets(word)
+            if syns:
+                return word
+            
+        for word in generate_ngrams(first_letters, 5):
+            syns = en_wn.synsets(word)
+            if syns:
+                return word
+            
+        for word in generate_ngrams(first_letters, 4):
+            syns = en_wn.synsets(word)
+            if syns:
+                return word            
 
-    def avoids_letter(text, letter='e'):
-        return letter not in text.lower()
-
-    def follows_fibonacci_sequence(text):
-        word_counts = [len(s.split()) for s in text.split('.') if s.strip()]
-        return all(
-            word_counts[i+2] == word_counts[i] + word_counts[i+1] 
-            for i in range(len(word_counts)-2)
-        )
-
-    def color_words_present(text):
-        color_map = {
-            'a': 'azure', 'b': 'burgundy', 'c': 'cyan', 'd': 'denim',
-            'e': 'ebony', 'f': 'fuchsia', 'g': 'green', 'h': 'heliotrope',
-            'i': 'indigo', 'j': 'jade', 'k': 'khaki', 'l': 'lavender',
-            'm': 'magenta', 'n': 'navy', 'o': 'ochre', 'p': 'purple',
-            'q': 'quartz', 'r': 'red', 's': 'scarlet', 't': 'teal',
-            'u': 'ultramarine', 'v': 'violet', 'w': 'white', 'x': 'xanthic',
-            'y': 'yellow', 'z': 'zaffre'
-        }
-        first_letters = set(w[0].lower() for w in text.split() if w)
-        return all(
-            color_map.get(l, '') in text.lower()
-            for l in first_letters if l in color_map
-        )
-
-    def contains_palindrome_paragraph(text):
-        paras = text.split('\n\n')
-        return any(
-            p.replace(' ','').lower() == p.replace(' ','').lower()[::-1]
-            for p in paras if p.strip()
-        )
-
-    def abab_rhyme_scheme(text):
+    def rhyme(text):
         """
         Expects text with 4 lines. Returns True if the first and third lines rhyme
         and the second and fourth lines rhyme (and the two rhymes are different).
@@ -389,109 +252,103 @@ def check_constraints(text, num_returns=3):
         return (rhyme1 is not None and rhyme2 is not None and
                 rhyme1 == rhyme3 and rhyme2 == rhyme4 and rhyme1 != rhyme2)
 
-    def contains_dual_meanings(text):
-        return sum(1 for word in text.split() if len(wordnet.synsets(word)) >= 3) > 5
 
-    def mixed_tense_check(text):
-        tense_changes = 0
-        prev_tense = None
-        for word, tag in pos_tag(word_tokenize(text)):
-            current_tense = 'past' if tag in ['VBD','VBN'] else 'present'
-            if prev_tense and current_tense != prev_tense:
-                tense_changes += 1
-            prev_tense = current_tense
-        return tense_changes > 3
+    if spacy_nlp is None:
+        spacy_nlp = spacy.load('en_core_web_sm')
 
-    def contains_html_tags(text):
-        html_pattern = re.compile(r'<[^>]+>')
-        return bool(html_pattern.search(text))
+    if en_wn is None:
+        en_wn = wn.Wordnet('omw-en')
 
-    def contains_urls(text):
-        url_pattern = re.compile(r'https?://\S+|www\.\S+')
-        return bool(url_pattern.search(text))
+    starts_with = {}
+    ends_with = {}
+    for t in text.split(". "):
+        t_arr = t.split(" ")
+        if len(t_arr) > 3:
+            t2 = " ".join(t_arr[:3]).strip(".?!|;,")
+            starts_with[t2] = starts_with.get(t2, 0) + 1
+        if len(t_arr) > 4:
+            t2 = " ".join(t_arr[:4]).strip(".?!|;,")
+            starts_with[t2] = starts_with.get(t2, 0) + 1
+        if len(t_arr) > 5:
+            t2 = " ".join(t_arr[:5]).strip(".?!|;,")
+            starts_with[t2] = starts_with.get(t2, 0) + 1
+            
+        if len(t_arr) > 5:
+            t2 = " ".join(t_arr[-3:]).strip(".?!|;,")
+            ends_with[t2] = ends_with.get(t2, 0) + 1
+        if len(t_arr) > 6:
+            t2 = " ".join(t_arr[-4:]).strip(".?!|;,")
+            ends_with[t2] = ends_with.get(t2, 0) + 1
+        if len(t_arr) > 7:
+            t2 = " ".join(t_arr[-5:]).strip(".?!|;,")
+            ends_with[t2] = ends_with.get(t2, 0) + 1
+            
+    starts_with_para = {}
+    ends_with_para = {}
+    for t in text.split("\n"):
+        t_arr = t.split(" ")
+        if len(t_arr) > 3:
+            t2 = " ".join(t_arr[:3]).strip(".?!|;,")
+            starts_with_para[t2] = starts_with_para.get(t2, 0) + 1
+        if len(t_arr) > 4:
+            t2 = " ".join(t_arr[:4]).strip(".?!|;,")
+            starts_with_para[t2] = starts_with_para.get(t2, 0) + 1
+        if len(t_arr) > 5:
+            t2 = " ".join(t_arr[:5]).strip(".?!|;,")
+            starts_with_para[t2] = starts_with_para.get(t2, 0) + 1
+            
+        if len(t_arr) > 5:
+            t2 = " ".join(t_arr[-3:]).strip(".?!|;,")
+            ends_with_para[t2] = ends_with_para.get(t2, 0) + 1
+        if len(t_arr) > 6:
+            t2 = " ".join(t_arr[-4:]).strip(".?!|;,")
+            ends_with_para[t2] = ends_with_para.get(t2, 0) + 1
+        if len(t_arr) > 7:
+            t2 = " ".join(t_arr[-5:]).strip(".?!|;,")
+            ends_with_para[t2] = ends_with_para.get(t2, 0) + 1
 
-    def contains_email_addresses(text):
-        email_pattern = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
-        return bool(email_pattern.search(text))
-
-    def contains_phone_numbers(text):
-        phone_pattern = re.compile(r'\+?\d[\d -]{8,12}\d')
-        return bool(phone_pattern.search(text))
-
-    def contains_hashtags(text):
-        hashtag_pattern = re.compile(r'#\w+')
-        return bool(hashtag_pattern.search(text))
-
-    def contains_mentions(text):
-        mention_pattern = re.compile(r'@\w+')
-        return bool(mention_pattern.search(text))
-
-    random_letter = random.choice(ascii_lowercase)
-
-    checks = {
-        # "word_count": len(text.split()),
-        "sentence_count": count_sentences(text),
-        "unique_word_count": len(set(text.lower().split())),
-        "palindrome_count": count_palindromes(text),
-        "double_letter_words": count_double_letters(text),
-        "contains_emojis": has_emojis(text),
-        "contains_numbers": contains_numbers(text),
-        "contains_punctuation": contains_punctuation(text),
+            
+    for key in list(starts_with_para.keys()):
+        if starts_with_para[key] < 2: del starts_with_para[key]
+    for key in list(ends_with_para.keys()):
+        if ends_with_para[key] < 2: del ends_with_para[key]
+        
+    for key in list(starts_with.keys()):
+        if starts_with[key] < 2: del starts_with[key]
+    for key in list(ends_with.keys()):
+        if ends_with[key] < 2: del ends_with[key]
+        
+    results = {
+        "palindrome": palindromes(text),        
         "uppercase_word_count": uppercase_word_count(text),
-        "contains_repeated_words": contains_repeated_words(text),
-        "max_repeated_word_count": max_word_repeats(text),
-        "contains_special_characters": contains_special_characters(text),
-        f"starts_with_letter_{random_letter}": starts_with_letter(text, random_letter),
-        "contains_question": contains_question(text),
-        "contains_exclamation": contains_exclamation(text),
-        "sentence_length_variability": sentence_length_variability(text),
-        "uncommon_word_usage": count_uncommon_words(text),
-        "common_word_overuse": count_common_word_overuse(text),
         "ngram_repetitions": count_ngram_repetitions(text),
-        "contains_contradictions": contains_contradictions(text),
-        "contains_rhetorical_questions": contains_rhetorical_questions(text),
-        "contains_excessive_parentheses": contains_excessive_parentheses(text),
-        "contains_excessive_adverbs": contains_excessive_adverbs(text),
-        "contains_excessive_passive_voice": contains_excessive_passive_voice(text),
-        "contains_hyperbole": contains_hyperbole(text),
         "contains_list_or_enumeration": contains_list_or_enumeration(text),
-        "words_ending_in_x": count_words_ending_in_x(text),
-        "words_starting_in_x": count_words_starting_in_x(text),
         "common_noun_hypernyms": analyze_nouns_common_hypernyms(text),
         "paragraph_count": count_paragraphs(text),
-        f"paragraphs_start_with_{random_letter}": paragraphs_start_with_letter(text, random_letter),
-        "consecutive_alliterative_words": consecutive_alliterative_words(text),
-        "is_haiku": is_haiku(text),
         "hidden_acrostic": hidden_acrostic(text),
-        "avoids_letter_e": avoids_letter(text, 'e'),
-        "follows_fibonacci_sequence": follows_fibonacci_sequence(text),
-        "color_words_present": color_words_present(text),
-        "contains_palindrome_paragraph": contains_palindrome_paragraph(text),
-        "abab_rhyme_scheme": abab_rhyme_scheme(text),
-        "contains_dual_meanings": contains_dual_meanings(text),
-        "mixed_tense_check": mixed_tense_check(text),
-        "contains_html_tags": contains_html_tags(text),
-        "contains_urls": contains_urls(text),
-        "contains_email_addresses": contains_email_addresses(text),
-        "contains_phone_numbers": contains_phone_numbers(text),
-        "contains_hashtags": contains_hashtags(text),
-        "contains_mentions": contains_mentions(text),
-    }
+        "para_starts_with": starts_with_para,
+        "para_ends_with": ends_with_para,         
+        "sent_starts_with": starts_with,
+        "sent_ends_with": ends_with,         
+        "word_count": len(text.split()),
+        "sentence_count": count_sentences(text),
+        "repeated_sentences": repeated_sentences(text),        
+        "unique_word_count": len(set(text.lower().split())),}
 
-    # Return a random sample of 5 checks for brevity
-    # Return a random sample of num_returs checks for brevity
-    # You should have more positive checks than negative checks
-    shuff_keys, results = list(checks.keys()), {}
-    random.shuffle(shuff_keys)
-    num_neg = random.randint(0, 1) 
-    num_pos = num_returns - num_neg
-    for key in shuff_keys:
-        if num_neg > 0 and (not checks[key] or checks[key]==0):
-            results[key] = checks[key]
-            num_neg -= 1
-        if num_pos > 0 and (checks[key] or checks[key] > 0):
-            results[key] = checks[key]
-            num_pos -= 1
+    # # Return a random sample of 5 checks for brevity
+    # # Return a random sample of num_returs checks for brevity
+    # # You should have more positive checks than negative checks
+    # shuff_keys, results = list(checks.keys()), {}
+    # random.shuffle(shuff_keys)
+    # num_neg = random.randint(0, 1) 
+    # num_pos = num_returns - num_neg
+    # for key in shuff_keys:
+    #     if num_neg > 0 and (not checks[key] or checks[key]==0):
+    #         results[key] = checks[key]
+    #         num_neg -= 1
+    #     if num_pos > 0 and (checks[key] or checks[key] > 0):
+    #         results[key] = checks[key]
+    #         num_pos -= 1
 
     return results
 
@@ -521,65 +378,17 @@ constraint_templates = {
         "Ensure your vocabulary consists of {unique_word_count} unique words.",
         "Compose your answer with {unique_word_count} distinct words."
     ],
-    "palindrome_count": [
-        "Ensure that your answer contains {palindrome_count} palindromes.",
-        "Your response should include {palindrome_count} palindromic words.",
-        "Make sure to incorporate {palindrome_count} palindromes in your reply.",
-        "Your text must feature {palindrome_count} instances of palindromes.",
-        "Include exactly {palindrome_count} palindromes in your answer.",
-        "The answer should have {palindrome_count} palindrome elements.",
-        "Craft your response with {palindrome_count} palindromic occurrences.",
-        "Please ensure there are {palindrome_count} palindromes in your reply.",
+    "palindrome": [
+        "Ensure that your answer contains {palindrome}.",
+        "Your response should include {palindrome} as a palindromic words.",
+        "Make sure to incorporate {palindrome} palindrome in your reply.",
+        "Your text must feature {palindrome} as a palindrome.",
+        "Include exactly {palindrome} as a palindrome in your answer.",
+        "The answer should have {palindrome_count} element as a palindrome.",
+        "Craft your response with {palindrome_count} as a palindromic occurrences.",
+        "Please ensure there are {palindrome_count} palindrome in your reply.",
         "Structure your answer to include {palindrome_count} palindromic instances.",
         "Compose your response with {palindrome_count} palindromes."
-    ],
-    "double_letter_words": [
-        "Ensure your response contains {double_letter_words} words with double letters.",
-        "Your answer should include {double_letter_words} instances of double-letter words.",
-        "Make sure to incorporate {double_letter_words} words featuring double letters in your reply.",
-        "Your text must feature {double_letter_words} words that have consecutive identical letters.",
-        "Include exactly {double_letter_words} double-letter words in your answer.",
-        "The reply should contain {double_letter_words} words with repeated letters.",
-        "Craft your response using {double_letter_words} words that include double letters.",
-        "Please ensure there are {double_letter_words} words with double letters in your text.",
-        "Structure your answer to comprise {double_letter_words} double-letter words.",
-        "Compose your response with {double_letter_words} words containing double letters."
-    ],
-    "contains_emojis": [
-        "Ensure that your response contains {contains_emojis} emojis.",
-        "Your answer should include {contains_emojis} emojis.",
-        "Make sure to incorporate {contains_emojis} emojis in your reply.",
-        "Your text must feature {contains_emojis} emojis.",
-        "Include exactly {contains_emojis} emojis in your answer.",
-        "Craft your response with {contains_emojis} emojis.",
-        "Please ensure there are {contains_emojis} emojis in your text.",
-        "Structure your answer to include {contains_emojis} emojis.",
-        "Compose your response featuring {contains_emojis} emojis.",
-        "The reply should have {contains_emojis} emojis."
-    ],
-    "contains_numbers": [
-        "Ensure that your response includes {contains_numbers} numerical figures.",
-        "Your answer should incorporate {contains_numbers} numbers.",
-        "Make sure to include {contains_numbers} numeric characters in your reply.",
-        "Your text must feature {contains_numbers} numbers.",
-        "Include exactly {contains_numbers} numbers in your answer.",
-        "Craft your response with {contains_numbers} numerical elements.",
-        "Please ensure there are {contains_numbers} numbers present in your text.",
-        "Structure your answer to comprise {contains_numbers} numeric characters.",
-        "Compose your response with {contains_numbers} numbers.",
-        "The reply should contain {contains_numbers} numerical figures."
-    ],
-    "contains_punctuation": [
-        "Ensure that your response contains {contains_punctuation} punctuation marks.",
-        "Your answer should include {contains_punctuation} punctuation symbols.",
-        "Make sure to incorporate {contains_punctuation} punctuation elements in your reply.",
-        "Your text must feature {contains_punctuation} punctuation marks.",
-        "Include exactly {contains_punctuation} punctuation symbols in your answer.",
-        "Craft your response with {contains_punctuation} punctuation characters.",
-        "Please ensure there are {contains_punctuation} punctuation marks in your text.",
-        "Structure your answer to include {contains_punctuation} punctuation marks.",
-        "Compose your response featuring {contains_punctuation} punctuation elements.",
-        "The reply should have {contains_punctuation} punctuation symbols."
     ],
     "uppercase_word_count": [
         "Ensure that your answer includes {uppercase_word_count} uppercase words.",
@@ -593,115 +402,6 @@ constraint_templates = {
         "Compose your response featuring {uppercase_word_count} uppercase words.",
         "The answer should have {uppercase_word_count} uppercase words."
     ],
-    "contains_repeated_words": [
-        "Ensure that your response includes repeated words as required: {contains_repeated_words}.",
-        "Your answer should demonstrate repeated words with a count of {contains_repeated_words}.",
-        "Make sure your reply contains repeated words, totaling {contains_repeated_words}.",
-        "Your text must feature {contains_repeated_words} instances of repeated words.",
-        "Include exactly {contains_repeated_words} occurrences of repeated words in your answer.",
-        "Craft your response so that it has {contains_repeated_words} repeated words.",
-        "Please ensure there are {contains_repeated_words} repeated words in your reply.",
-        "Structure your answer to comprise {contains_repeated_words} repeated words.",
-        "Compose your response with {contains_repeated_words} repeated words.",
-        "The answer should have {contains_repeated_words} instances of repeated words."
-    ],
-    "max_repeated_word_count": [
-        "Ensure that the maximum repetition of any word in your answer is {max_repeated_word_count}.",
-        "Your response should not exceed {max_repeated_word_count} repetitions for any word.",
-        "Make sure no word in your reply is repeated more than {max_repeated_word_count} times.",
-        "The answer should have a maximum of {max_repeated_word_count} repeats for any single word.",
-        "Include constraints such that no word repeats more than {max_repeated_word_count} times.",
-        "Craft your response with a cap of {max_repeated_word_count} on repeated words.",
-        "Please ensure that word repetition does not exceed {max_repeated_word_count} in your answer.",
-        "Structure your text so that the maximum repeated word count is {max_repeated_word_count}.",
-        "Compose your reply ensuring no word appears more than {max_repeated_word_count} times.",
-        "The reply should have a limit of {max_repeated_word_count} for any repeated word."
-    ],
-    "contains_special_characters": [
-        "Ensure that your response contains {contains_special_characters} special characters.",
-        "Your answer should include {contains_special_characters} special symbols.",
-        "Make sure to incorporate {contains_special_characters} special characters in your reply.",
-        "Your text must feature {contains_special_characters} special characters.",
-        "Include exactly {contains_special_characters} special characters in your answer.",
-        "Craft your response with {contains_special_characters} special symbols.",
-        "Please ensure there are {contains_special_characters} special characters in your text.",
-        "Structure your answer to include {contains_special_characters} special characters.",
-        "Compose your response featuring {contains_special_characters} special symbols.",
-        "The reply should have {contains_special_characters} special characters."
-    ],
-    # For constraints that depend on a random letter, we use a placeholder {random_letter}
-    "starts_with_letter": [
-        "Ensure that your response starts with the letter '{random_letter}'.",
-        "Your answer should begin with the letter '{random_letter}'.",
-        "Make sure your reply starts with '{random_letter}'.",
-        "Your text must commence with the letter '{random_letter}'.",
-        "Include an opening letter '{random_letter}' at the start of your answer.",
-        "Craft your response so that it starts with '{random_letter}'.",
-        "Please begin your reply with the letter '{random_letter}'.",
-        "Structure your answer to start with '{random_letter}'.",
-        "Compose your response beginning with '{random_letter}'.",
-        "The reply should initiate with the letter '{random_letter}'."
-    ],
-    "contains_question": [
-        "Ensure that your response contains {contains_question} question marks.",
-        "Your answer should include {contains_question} questions.",
-        "Make sure to incorporate {contains_question} interrogative sentences in your reply.",
-        "Your text must feature {contains_question} question marks.",
-        "Include exactly {contains_question} questions in your answer.",
-        "Craft your response with {contains_question} interrogative elements.",
-        "Please ensure there are {contains_question} questions in your text.",
-        "Structure your answer to include {contains_question} question marks.",
-        "Compose your response featuring {contains_question} questions.",
-        "The reply should have {contains_question} question marks."
-    ],
-    "contains_exclamation": [
-        "Ensure that your response contains {contains_exclamation} exclamation marks.",
-        "Your answer should include {contains_exclamation} exclamations.",
-        "Make sure to incorporate {contains_exclamation} exclamatory sentences in your reply.",
-        "Your text must feature {contains_exclamation} exclamation marks.",
-        "Include exactly {contains_exclamation} exclamations in your answer.",
-        "Craft your response with {contains_exclamation} exclamatory elements.",
-        "Please ensure there are {contains_exclamation} exclamation marks in your text.",
-        "Structure your answer to include {contains_exclamation} exclamations.",
-        "Compose your response featuring {contains_exclamation} exclamation marks.",
-        "The reply should have {contains_exclamation} exclamation points."
-    ],
-    "sentence_length_variability": [
-        "Ensure that your response exhibits a sentence length variability of {sentence_length_variability}.",
-        "Your answer should demonstrate a sentence length variability of {sentence_length_variability}.",
-        "Make sure your reply has a sentence length variation of {sentence_length_variability}.",
-        "Your text must reflect a sentence length variability of {sentence_length_variability}.",
-        "Include a sentence length variability of {sentence_length_variability} in your answer.",
-        "Craft your response with a sentence length variability of {sentence_length_variability}.",
-        "Please ensure your reply shows a variability in sentence lengths of {sentence_length_variability}.",
-        "Structure your answer to feature a sentence length variability of {sentence_length_variability}.",
-        "Compose your response with a sentence length variation of {sentence_length_variability}.",
-        "The reply should have a sentence length variability of {sentence_length_variability}."
-    ],
-    "uncommon_word_usage": [
-        "Ensure that your answer includes {uncommon_word_usage} uncommon words.",
-        "Your response should feature {uncommon_word_usage} rare vocabulary terms.",
-        "Make sure to incorporate {uncommon_word_usage} uncommon words in your reply.",
-        "Your text must utilize {uncommon_word_usage} unique words.",
-        "Include exactly {uncommon_word_usage} uncommon words in your answer.",
-        "Craft your response with {uncommon_word_usage} rare words.",
-        "Please ensure there are {uncommon_word_usage} uncommon terms in your text.",
-        "Structure your answer to include {uncommon_word_usage} rare words.",
-        "Compose your response featuring {uncommon_word_usage} uncommon vocabulary.",
-        "The reply should have {uncommon_word_usage} uncommon words."
-    ],
-    "common_word_overuse": [
-        "Ensure that your answer does not overuse common words beyond {common_word_overuse} times.",
-        "Your response should limit common word usage to {common_word_overuse} occurrences.",
-        "Make sure that no common word is repeated more than {common_word_overuse} times in your reply.",
-        "Your text must restrict common word overuse to {common_word_overuse} instances.",
-        "Limit the repetition of common words to {common_word_overuse} times in your answer.",
-        "Craft your response so that common words are used no more than {common_word_overuse} times.",
-        "Please ensure that common words are not overused more than {common_word_overuse} occurrences in your text.",
-        "Structure your answer with a maximum common word usage of {common_word_overuse}.",
-        "Compose your reply limiting common word overuse to {common_word_overuse} times.",
-        "The reply should adhere to a common word repetition limit of {common_word_overuse}."
-    ],
     "ngram_repetitions": [
         "Ensure that your response contains {ngram_repetitions} repeated n-grams.",
         "Your answer should include {ngram_repetitions} instances of n-gram repetition.",
@@ -714,78 +414,6 @@ constraint_templates = {
         "Compose your response featuring {ngram_repetitions} repeated n-grams.",
         "The reply should have {ngram_repetitions} instances of n-gram repetition."
     ],
-    "contains_contradictions": [
-        "Ensure that your response highlights {contains_contradictions} contradictions.",
-        "Your answer should include {contains_contradictions} contradictory elements.",
-        "Make sure to incorporate {contains_contradictions} instances of contradiction in your reply.",
-        "Your text must feature {contains_contradictions} contradictions.",
-        "Include exactly {contains_contradictions} contradictions in your answer.",
-        "Craft your response with {contains_contradictions} contradictory statements.",
-        "Please ensure there are {contains_contradictions} contradictions in your text.",
-        "Structure your answer to include {contains_contradictions} contradictory elements.",
-        "Compose your response featuring {contains_contradictions} contradictions.",
-        "The reply should have {contains_contradictions} instances of contradiction."
-    ],
-    "contains_rhetorical_questions": [
-        "Ensure that your response contains {contains_rhetorical_questions} rhetorical questions.",
-        "Your answer should include {contains_rhetorical_questions} instances of rhetorical questioning.",
-        "Make sure to incorporate {contains_rhetorical_questions} rhetorical questions in your reply.",
-        "Your text must feature {contains_rhetorical_questions} rhetorical questions.",
-        "Include exactly {contains_rhetorical_questions} rhetorical questions in your answer.",
-        "Craft your response with {contains_rhetorical_questions} rhetorical questions.",
-        "Please ensure there are {contains_rhetorical_questions} rhetorical questions in your text.",
-        "Structure your answer to include {contains_rhetorical_questions} rhetorical questions.",
-        "Compose your response featuring {contains_rhetorical_questions} rhetorical questions.",
-        "The reply should have {contains_rhetorical_questions} instances of rhetorical questions."
-    ],
-    "contains_excessive_parentheses": [
-        "Ensure that your response contains {contains_excessive_parentheses} instances of excessive parentheses.",
-        "Your answer should include {contains_excessive_parentheses} excessive parentheses.",
-        "Make sure to incorporate {contains_excessive_parentheses} sets of excessive parentheses in your reply.",
-        "Your text must feature {contains_excessive_parentheses} instances of overused parentheses.",
-        "Include exactly {contains_excessive_parentheses} occurrences of excessive parentheses in your answer.",
-        "Craft your response with {contains_excessive_parentheses} instances of unnecessary parentheses.",
-        "Please ensure there are {contains_excessive_parentheses} excessive parentheses in your text.",
-        "Structure your answer to include {contains_excessive_parentheses} overused parentheses.",
-        "Compose your response featuring {contains_excessive_parentheses} excessive parentheses.",
-        "The reply should have {contains_excessive_parentheses} instances of redundant parentheses."
-    ],
-    "contains_excessive_adverbs": [
-        "Ensure that your response contains {contains_excessive_adverbs} instances of excessive adverbs.",
-        "Your answer should include {contains_excessive_adverbs} overused adverbs.",
-        "Make sure to incorporate {contains_excessive_adverbs} adverbs in your reply.",
-        "Your text must feature {contains_excessive_adverbs} instances of adverbial excess.",
-        "Include exactly {contains_excessive_adverbs} excessive adverbs in your answer.",
-        "Craft your response with {contains_excessive_adverbs} adverbs.",
-        "Please ensure there are {contains_excessive_adverbs} excessive adverbs in your text.",
-        "Structure your answer to include {contains_excessive_adverbs} overused adverbs.",
-        "Compose your response featuring {contains_excessive_adverbs} adverbs.",
-        "The reply should have {contains_excessive_adverbs} instances of adverbial overuse."
-    ],
-    "contains_excessive_passive_voice": [
-        "Ensure that your response contains {contains_excessive_passive_voice} instances of passive voice.",
-        "Your answer should include {contains_excessive_passive_voice} passive voice constructions.",
-        "Make sure to incorporate {contains_excessive_passive_voice} instances of passive voice in your reply.",
-        "Your text must feature {contains_excessive_passive_voice} instances of passive voice usage.",
-        "Include exactly {contains_excessive_passive_voice} passive voice constructions in your answer.",
-        "Craft your response with {contains_excessive_passive_voice} instances of passive voice.",
-        "Please ensure there are {contains_excessive_passive_voice} instances of passive voice in your text.",
-        "Structure your answer to include {contains_excessive_passive_voice} passive voice constructions.",
-        "Compose your response featuring {contains_excessive_passive_voice} instances of passive voice.",
-        "The reply should have {contains_excessive_passive_voice} passive voice instances."
-    ],
-    "contains_hyperbole": [
-        "Ensure that your response contains {contains_hyperbole} instances of hyperbole.",
-        "Your answer should include {contains_hyperbole} hyperbolic expressions.",
-        "Make sure to incorporate {contains_hyperbole} hyperbolic statements in your reply.",
-        "Your text must feature {contains_hyperbole} instances of exaggeration.",
-        "Include exactly {contains_hyperbole} hyperbolic elements in your answer.",
-        "Craft your response with {contains_hyperbole} instances of hyperbole.",
-        "Please ensure there are {contains_hyperbole} hyperbolic expressions in your text.",
-        "Structure your answer to include {contains_hyperbole} exaggerations.",
-        "Compose your response featuring {contains_hyperbole} hyperbolic phrases.",
-        "The reply should have {contains_hyperbole} instances of hyperbole."
-    ],
     "contains_list_or_enumeration": [
         "Ensure that your response contains {contains_list_or_enumeration} lists or enumerations.",
         "Your answer should include {contains_list_or_enumeration} enumerated lists.",
@@ -797,30 +425,6 @@ constraint_templates = {
         "Structure your answer to include {contains_list_or_enumeration} lists or enumerations.",
         "Compose your response featuring {contains_list_or_enumeration} lists or enumerations.",
         "The reply should have {contains_list_or_enumeration} instances of enumeration."
-    ],
-    "words_ending_in_x": [
-        "Ensure that your response contains {words_ending_in_x} words ending with the letter 'x'.",
-        "Your answer should include {words_ending_in_x} words that end in 'x'.",
-        "Make sure to incorporate {words_ending_in_x} words ending in 'x' in your reply.",
-        "Your text must feature {words_ending_in_x} words ending with 'x'.",
-        "Include exactly {words_ending_in_x} words that finish with the letter 'x' in your answer.",
-        "Craft your response with {words_ending_in_x} words ending in 'x'.",
-        "Please ensure there are {words_ending_in_x} words that end in 'x' in your text.",
-        "Structure your answer to include {words_ending_in_x} words ending in 'x'.",
-        "Compose your response featuring {words_ending_in_x} words that conclude with 'x'.",
-        "The reply should have {words_ending_in_x} words ending with the letter 'x'."
-    ],
-    "words_starting_in_x": [
-        "Ensure that your response contains {words_starting_in_x} words starting with the letter 'x'.",
-        "Your answer should include {words_starting_in_x} words that begin with 'x'.",
-        "Make sure to incorporate {words_starting_in_x} words starting with 'x' in your reply.",
-        "Your text must feature {words_starting_in_x} words beginning with the letter 'x'.",
-        "Include exactly {words_starting_in_x} words that start with 'x' in your answer.",
-        "Craft your response with {words_starting_in_x} words that commence with 'x'.",
-        "Please ensure there are {words_starting_in_x} words starting with 'x' in your text.",
-        "Structure your answer to include {words_starting_in_x} words that begin with 'x'.",
-        "Compose your response featuring {words_starting_in_x} words starting with 'x'.",
-        "The reply should have {words_starting_in_x} words beginning with 'x'."
     ],
     "common_noun_hypernyms": [
         "Ensure that your response analyzes common noun hypernyms with a count of {common_noun_hypernyms}.",
@@ -858,30 +462,6 @@ constraint_templates = {
         "Compose your response with paragraphs that all start with '{random_letter}'.",
         "The reply should have each paragraph beginning with '{random_letter}'."
     ],
-    "consecutive_alliterative_words": [
-        "Ensure that your response contains {consecutive_alliterative_words} instances of consecutive alliterative words.",
-        "Your answer should include {consecutive_alliterative_words} groups of alliterative words in succession.",
-        "Make sure to incorporate {consecutive_alliterative_words} consecutive alliterative words in your reply.",
-        "Your text must feature {consecutive_alliterative_words} instances of alliteration in consecutive words.",
-        "Include exactly {consecutive_alliterative_words} occurrences of consecutive alliterative words in your answer.",
-        "Craft your response with {consecutive_alliterative_words} instances of consecutive alliterative terms.",
-        "Please ensure there are {consecutive_alliterative_words} instances of alliterative word sequences in your text.",
-        "Structure your answer to include {consecutive_alliterative_words} consecutive alliterative words.",
-        "Compose your response featuring {consecutive_alliterative_words} alliterative word groups.",
-        "The reply should have {consecutive_alliterative_words} instances of consecutive alliterative words."
-    ],
-    "is_haiku": [
-        "Ensure that your response is structured as a haiku: {is_haiku}.",
-        "Your answer should follow the haiku format: {is_haiku}.",
-        "Make sure your reply adheres to the haiku structure: {is_haiku}.",
-        "Your text must be composed as a haiku: {is_haiku}.",
-        "Include a haiku format in your answer, indicated by {is_haiku}.",
-        "Craft your response as a haiku if applicable: {is_haiku}.",
-        "Please ensure your reply follows the haiku style: {is_haiku}.",
-        "Structure your answer to conform to the haiku format: {is_haiku}.",
-        "Compose your response in the form of a haiku: {is_haiku}.",
-        "The reply should be arranged as a haiku: {is_haiku}."
-    ],
     "hidden_acrostic": [
         "Ensure that your response contains a hidden acrostic: {hidden_acrostic}.",
         "Your answer should include a concealed acrostic: {hidden_acrostic}.",
@@ -894,161 +474,82 @@ constraint_templates = {
         "Compose your response featuring a hidden acrostic: {hidden_acrostic}.",
         "The reply should have a hidden acrostic element: {hidden_acrostic}."
     ],
-    "avoids_letter_e": [
-        "Ensure that your response avoids using the letter 'e', as required: {avoids_letter_e}.",
-        "Your answer should be crafted to avoid the letter 'e': {avoids_letter_e}.",
-        "Make sure your reply does not include the letter 'e': {avoids_letter_e}.",
-        "Your text must refrain from using the letter 'e': {avoids_letter_e}.",
-        "Compose your answer while avoiding the letter 'e': {avoids_letter_e}.",
-        "Craft your response to exclude the letter 'e': {avoids_letter_e}.",
-        "Please ensure your reply avoids any usage of the letter 'e': {avoids_letter_e}.",
-        "Structure your answer so that it does not contain the letter 'e': {avoids_letter_e}.",
-        "Your response should completely omit the letter 'e': {avoids_letter_e}.",
-        "The reply must be free of the letter 'e': {avoids_letter_e}."
+    "para_ends_with": [
+        "Make sure each paragraph ends with the phrase '{para_ends_with}'.",
+        "Conclude every paragraph with '{para_ends_with}'.",
+        "Your paragraphs should all finish with the words: '{para_ends_with}'.",
+        "Each paragraph must wrap up using the phrase '{para_ends_with}'.",
+        "Ensure that the closing line of each paragraph contains '{para_ends_with}'.",
+        "Use '{para_ends_with}' to end every paragraph in your response.",
+        "Let '{para_ends_with}' serve as the final words in each paragraph.",
+        "Every paragraph should end with the exact text: '{para_ends_with}'.",
+        "The last phrase of all paragraphs should be '{para_ends_with}'.",
+        "Close each paragraph with the following: '{para_ends_with}'."
     ],
-    "follows_fibonacci_sequence": [
-        "Ensure that your response follows a Fibonacci sequence pattern: {follows_fibonacci_sequence}.",
-        "Your answer should incorporate elements that follow the Fibonacci sequence: {follows_fibonacci_sequence}.",
-        "Make sure your reply adheres to a Fibonacci sequence: {follows_fibonacci_sequence}.",
-        "Your text must be structured to follow the Fibonacci sequence: {follows_fibonacci_sequence}.",
-        "Include a Fibonacci sequence in your answer, as indicated by {follows_fibonacci_sequence}.",
-        "Craft your response with a Fibonacci sequence pattern: {follows_fibonacci_sequence}.",
-        "Please ensure your reply follows a Fibonacci sequence: {follows_fibonacci_sequence}.",
-        "Structure your answer to reflect a Fibonacci sequence: {follows_fibonacci_sequence}.",
-        "Compose your response featuring a Fibonacci sequence: {follows_fibonacci_sequence}.",
-        "The reply should have a structure that follows the Fibonacci sequence: {follows_fibonacci_sequence}."
+    
+    "sent_starts_with": [
+        "Begin each sentence with the phrase '{sent_starts_with}'.",
+        "Make sure every sentence starts with '{sent_starts_with}'.",
+        "Your sentences must all open with the words '{sent_starts_with}'.",
+        "Use '{sent_starts_with}' to initiate each sentence in your text.",
+        "Start every single sentence with the phrase: '{sent_starts_with}'.",
+        "Each sentence in your response should begin with '{sent_starts_with}'.",
+        "The first few words of each sentence must be '{sent_starts_with}'.",
+        "Let '{sent_starts_with}' be the opening of every sentence you write.",
+        "Ensure that all your sentences launch with '{sent_starts_with}'.",
+        "Begin your sentences consistently with '{sent_starts_with}'."
     ],
-    "color_words_present": [
-        "Ensure that your response contains {color_words_present} color words.",
-        "Your answer should include {color_words_present} words that denote colors.",
-        "Make sure to incorporate {color_words_present} color-related words in your reply.",
-        "Your text must feature {color_words_present} color words.",
-        "Include exactly {color_words_present} color words in your answer.",
-        "Craft your response with {color_words_present} words associated with colors.",
-        "Please ensure there are {color_words_present} color words in your text.",
-        "Structure your answer to include {color_words_present} color words.",
-        "Compose your response featuring {color_words_present} words that represent colors.",
-        "The reply should have {color_words_present} color words."
+    
+    "sent_ends_with": [
+        "End each sentence with '{sent_ends_with}'.",
+        "Your sentences should all finish using the phrase '{sent_ends_with}'.",
+        "Conclude every sentence with '{sent_ends_with}' as the last words.",
+        "Make sure the final words of each sentence are '{sent_ends_with}'.",
+        "Let '{sent_ends_with}' be how every sentence ends.",
+        "Each sentence must wrap up with the phrase '{sent_ends_with}'.",
+        "Ensure your sentences terminate with '{sent_ends_with}'.",
+        "Use '{sent_ends_with}' to end every sentence you write.",
+        "Finish your sentences with the exact wording: '{sent_ends_with}'.",
+        "Sentences should consistently conclude with '{sent_ends_with}'."
     ],
-    "contains_palindrome_paragraph": [
-        "Ensure that your response contains a paragraph with a palindrome: {contains_palindrome_paragraph}.",
-        "Your answer should include a paragraph featuring a palindrome: {contains_palindrome_paragraph}.",
-        "Make sure to incorporate a palindrome paragraph in your reply: {contains_palindrome_paragraph}.",
-        "Your text must feature a paragraph that is a palindrome: {contains_palindrome_paragraph}.",
-        "Include exactly {contains_palindrome_paragraph} palindrome paragraph in your answer.",
-        "Craft your response with a palindrome paragraph: {contains_palindrome_paragraph}.",
-        "Please ensure there is a paragraph containing a palindrome in your text: {contains_palindrome_paragraph}.",
-        "Structure your answer to include a paragraph that is a palindrome: {contains_palindrome_paragraph}.",
-        "Compose your response featuring a palindrome paragraph: {contains_palindrome_paragraph}.",
-        "The reply should have a paragraph with a palindrome: {contains_palindrome_paragraph}."
+    
+    "word_count": [
+        "Make sure your text contains exactly {word_count} words.",
+        "Your response should include a total of {word_count} words.",
+        "Ensure the word count is precisely {word_count}.",
+        "Craft your answer with exactly {word_count} words.",
+        "Write a response that adds up to {word_count} words.",
+        "Do not exceed or fall short of {word_count} total words.",
+        "Use {word_count} words in your reply, no more, no less.",
+        "Your answer must contain a word count of {word_count}.",
+        "Hit the target of {word_count} words in your text.",
+        "Structure your text to be exactly {word_count} words long."
     ],
-    "abab_rhyme_scheme": [
-        "Ensure that your response follows an ABAB rhyme scheme: {abab_rhyme_scheme}.",
-        "Your answer should adhere to an ABAB rhyme pattern: {abab_rhyme_scheme}.",
-        "Make sure your reply follows the ABAB rhyme scheme: {abab_rhyme_scheme}.",
-        "Your text must be structured with an ABAB rhyme scheme: {abab_rhyme_scheme}.",
-        "Include an ABAB rhyme pattern in your answer, as indicated by {abab_rhyme_scheme}.",
-        "Craft your response to follow an ABAB rhyme scheme: {abab_rhyme_scheme}.",
-        "Please ensure your reply adheres to the ABAB rhyme pattern: {abab_rhyme_scheme}.",
-        "Structure your answer with an ABAB rhyme scheme: {abab_rhyme_scheme}.",
-        "Compose your response featuring an ABAB rhyme scheme: {abab_rhyme_scheme}.",
-        "The reply should have an ABAB rhyme pattern: {abab_rhyme_scheme}."
+    
+    "sentence_count": [
+        "Include exactly {sentence_count} full sentences in your response.",
+        "Limit your answer to {sentence_count} sentences only.",
+        "Ensure you write precisely {sentence_count} complete sentences.",
+        "Stick to {sentence_count} distinct sentences in your reply.",
+        "Your text must be composed of {sentence_count} sentences.",
+        "Keep your response to a clean {sentence_count} sentences.",
+        "Use {sentence_count} sentences to express your answer.",
+        "Structure your writing with exactly {sentence_count} sentences.",
+        "Craft your response using {sentence_count} standalone sentences.",
+        "Write your reply using no more and no fewer than {sentence_count} sentences."
     ],
-    "contains_dual_meanings": [
-        "Ensure that your response includes {contains_dual_meanings} instances of dual meanings.",
-        "Your answer should feature {contains_dual_meanings} elements with dual meanings.",
-        "Make sure to incorporate {contains_dual_meanings} ambiguous phrases in your reply.",
-        "Your text must contain {contains_dual_meanings} instances of dual meanings.",
-        "Include exactly {contains_dual_meanings} dual-meaning elements in your answer.",
-        "Craft your response with {contains_dual_meanings} instances of double entendre.",
-        "Please ensure there are {contains_dual_meanings} instances of dual meanings in your text.",
-        "Structure your answer to include {contains_dual_meanings} dual-meaning phrases.",
-        "Compose your response featuring {contains_dual_meanings} ambiguous elements.",
-        "The reply should have {contains_dual_meanings} instances of dual meanings."
-    ],
-    "mixed_tense_check": [
-        "Ensure that your response maintains a consistent tense, avoiding mixed tenses as indicated by {mixed_tense_check}.",
-        "Your answer should adhere to a single tense, with mixed tenses not exceeding {mixed_tense_check}.",
-        "Make sure your reply does not mix tenses, as constrained by {mixed_tense_check}.",
-        "Your text must be consistent in tense, with mixed tenses limited to {mixed_tense_check} instances.",
-        "Include a tense consistency in your answer, keeping mixed tenses to {mixed_tense_check}.",
-        "Craft your response with a focus on a single tense, allowing only {mixed_tense_check} mixed instances.",
-        "Please ensure there are no more than {mixed_tense_check} instances of mixed tenses in your text.",
-        "Structure your answer to maintain tense consistency, with mixed tenses capped at {mixed_tense_check}.",
-        "Compose your response in a consistent tense, limiting mixed tenses to {mixed_tense_check}.",
-        "The reply should exhibit tense consistency, with only {mixed_tense_check} mixed tense occurrences."
-    ],
-    "contains_html_tags": [
-        "Ensure that your response contains {contains_html_tags} HTML tags.",
-        "Your answer should include {contains_html_tags} HTML elements.",
-        "Make sure to incorporate {contains_html_tags} HTML tags in your reply.",
-        "Your text must feature {contains_html_tags} HTML tags.",
-        "Include exactly {contains_html_tags} HTML tags in your answer.",
-        "Craft your response with {contains_html_tags} HTML elements.",
-        "Please ensure there are {contains_html_tags} HTML tags in your text.",
-        "Structure your answer to include {contains_html_tags} HTML tags.",
-        "Compose your response featuring {contains_html_tags} HTML tags.",
-        "The reply should have {contains_html_tags} HTML tags."
-    ],
-    "contains_urls": [
-        "Ensure that your response contains {contains_urls} URLs.",
-        "Your answer should include {contains_urls} web links.",
-        "Make sure to incorporate {contains_urls} URLs in your reply.",
-        "Your text must feature {contains_urls} URLs.",
-        "Include exactly {contains_urls} URLs in your answer.",
-        "Craft your response with {contains_urls} web addresses.",
-        "Please ensure there are {contains_urls} URLs in your text.",
-        "Structure your answer to include {contains_urls} URLs.",
-        "Compose your response featuring {contains_urls} URLs.",
-        "The reply should have {contains_urls} URLs."
-    ],
-    "contains_email_addresses": [
-        "Ensure that your response contains {contains_email_addresses} email addresses.",
-        "Your answer should include {contains_email_addresses} email addresses.",
-        "Make sure to incorporate {contains_email_addresses} email addresses in your reply.",
-        "Your text must feature {contains_email_addresses} email addresses.",
-        "Include exactly {contains_email_addresses} email addresses in your answer.",
-        "Craft your response with {contains_email_addresses} email addresses.",
-        "Please ensure there are {contains_email_addresses} email addresses in your text.",
-        "Structure your answer to include {contains_email_addresses} email addresses.",
-        "Compose your response featuring {contains_email_addresses} email addresses.",
-        "The reply should have {contains_email_addresses} email addresses."
-    ],
-    "contains_phone_numbers": [
-        "Ensure that your response contains {contains_phone_numbers} phone numbers.",
-        "Your answer should include {contains_phone_numbers} contact numbers.",
-        "Make sure to incorporate {contains_phone_numbers} phone numbers in your reply.",
-        "Your text must feature {contains_phone_numbers} phone numbers.",
-        "Include exactly {contains_phone_numbers} phone numbers in your answer.",
-        "Craft your response with {contains_phone_numbers} phone numbers.",
-        "Please ensure there are {contains_phone_numbers} phone numbers in your text.",
-        "Structure your answer to include {contains_phone_numbers} phone numbers.",
-        "Compose your response featuring {contains_phone_numbers} phone numbers.",
-        "The reply should have {contains_phone_numbers} phone numbers."
-    ],
-    "contains_hashtags": [
-        "Ensure that your response contains {contains_hashtags} hashtags.",
-        "Your answer should include {contains_hashtags} hashtag(s).",
-        "Make sure to incorporate {contains_hashtags} hashtags in your reply.",
-        "Your text must feature {contains_hashtags} hashtags.",
-        "Include exactly {contains_hashtags} hashtags in your answer.",
-        "Craft your response with {contains_hashtags} hashtags.",
-        "Please ensure there are {contains_hashtags} hashtags in your text.",
-        "Structure your answer to include {contains_hashtags} hashtags.",
-        "Compose your response featuring {contains_hashtags} hashtags.",
-        "The reply should have {contains_hashtags} hashtag(s)."
-    ],
-    "contains_mentions": [
-        "Ensure that your response contains {contains_mentions} mentions.",
-        "Your answer should include {contains_mentions} mentions of users or entities.",
-        "Make sure to incorporate {contains_mentions} mentions in your reply.",
-        "Your text must feature {contains_mentions} mentions.",
-        "Include exactly {contains_mentions} mentions in your answer.",
-        "Craft your response with {contains_mentions} user or entity mentions.",
-        "Please ensure there are {contains_mentions} mentions in your text.",
-        "Structure your answer to include {contains_mentions} mentions.",
-        "Compose your response featuring {contains_mentions} mentions.",
-        "The reply should have {contains_mentions} mentions."
+    
+    "repeated_sentences": [
+        "Include {repeated_sentences} repeated sentence(s) in your answer.",
+        "Your response must reuse {repeated_sentences} sentence(s).",
+        "Deliberately repeat a sentence {repeated_sentences} time(s) in your response.",
+        "Make sure {repeated_sentences} sentence(s) appear more than once.",
+        "Use repetition by including {repeated_sentences} identical sentence(s).",
+        "There should be {repeated_sentences} instances of sentence repetition.",
+        "Let {repeated_sentences} of your sentences be used more than once.",
+        "Repeat a line or phrase exactly {repeated_sentences} time(s).",
+        "Echo the same sentence {repeated_sentences} times in your text.",
+        "Repetition of sentence(s) should happen {repeated_sentences} time(s) within your response."
     ]
 }
 

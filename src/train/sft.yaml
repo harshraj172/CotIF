@@ -1,0 +1,49 @@
+# Model arguments
+model_name_or_path: deepseek-ai/DeepSeek-R1-Distill-Llama-8B
+model_revision: main
+torch_dtype: bfloat16
+# attn_implementation: flash_attention_2
+use_liger_kernel: true
+bf16: true
+tf32: true
+output_dir: runs/cotroller_DeepSeek-R1-Distill-Llama-8B
+
+# Dataset arguments
+dataset_id_or_path: /share/u/harshraj/CotIF/data/forward/cotroller_train_dataset.json
+max_seq_length: 4096
+packing: true
+
+# LoRA arguments
+use_peft: true
+load_in_4bit: true
+lora_target_modules: "all-linear"
+# important as we need to train the special tokens for the chat template of llama 
+# lora_modules_to_save: ["lm_head", "model.embed_tokens"] # you might need to change this for qwen or other models
+lora_r: 16
+lora_alpha: 16
+
+# Training arguments
+# num_samples: 100
+num_train_epochs: 2
+# max_steps: 10
+per_device_train_batch_size: 8 #############
+gradient_accumulation_steps: 2
+gradient_checkpointing: true
+gradient_checkpointing_kwargs:
+  use_reentrant: false
+learning_rate: 5.0e-6 # Smaller than before 
+lr_scheduler_type: constant
+warmup_ratio: 0.03
+
+# Logging arguments
+logging_strategy: steps
+logging_steps: 5
+report_to:
+- tensorboard
+save_strategy: "epoch"
+seed: 42
+
+# Hugging Face Hub 
+push_to_hub: false
+# hub_model_id: llama-3-1-8b-math-orca-qlora-10k-ep1 # if not defined same as output_dir
+hub_strategy: every_save
