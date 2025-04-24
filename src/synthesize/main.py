@@ -32,7 +32,7 @@ forward_functions = [
     indent_paragraphs_forward,
     insert_sentence_divider_forward,
     render_as_html_forward,
-    translate_forward,
+    # translate_forward,
     ]
 
 backward_functions = [
@@ -182,8 +182,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Prepare dataset for r1 prompt training.")
     parser.add_argument("--use-autoif", action="store_true", help="Enable AutoIF (loads a 72B model).")
     parser.add_argument("--dataset-path", type=str, default="bespokelabs/Bespoke-Stratos-17k", help="HuggingFace dataset path.")
-    parser.add_argument("--num-samples", type=int, default=100, help="Number of samples to use from dataset.")
-    parser.add_argument("--output-path", type=str, default="/share/u/harshraj/CotIF/data/cotroller_train_dataset-mix.json", help="Path to save the processed dataset JSON.")
+    parser.add_argument("--num-samples", type=int, default=200, help="Number of samples to use from dataset.")
+    parser.add_argument("--output-path", type=str, default="/share/u/harshraj/CotIF/data-v2/cotroller_dataset-mix-v4.json", help="Path to save the processed dataset JSON.")
 
     args = parser.parse_args()
     
@@ -200,5 +200,11 @@ if __name__ == "__main__":
 
     dataset = dataset.map(generate_r1_prompt, remove_columns=dataset.features, batched=True, batch_size=1)
 
-    dataset.to_json(args.output_path, orient="records")
+    split = dataset.train_test_split(test_size=0.1, seed=42)
+
+    train_dataset = split['train']
+    test_dataset = split['test']
+    
+    train_dataset.to_json(args.output_path, orient="records")
+    test_dataset.to_json(args.output_path.replace('.json', '')+'-test.json', orient="records")
     logger.info(f"Saved processed dataset to {args.output_path}")

@@ -2,7 +2,6 @@
 **/__pycache__/
 **/**/__pycache__/
 
-
 # Ignore Python bytecode files
 **/*.pyc
 **/*.pyo
@@ -16,6 +15,9 @@ __pycache__/
 *.so
 
 # Distribution / packaging
+data/
+data-v2/
+models/
 .Python
 build/
 develop-eggs/

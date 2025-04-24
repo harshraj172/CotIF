@@ -1,21 +1,32 @@
 import re
+import time
 import random
+import httpx
 import html
-import numpy as np
+import numpy as np 
 import signal
 from tqdm import tqdm
 import json
-import jsonlines
+from lxml import etree
+from io import StringIO
 from collections import Counter
 from concurrent.futures import TimeoutError
+from langchain_openai import ChatOpenAI
 
 from nltk.corpus import wordnet as wn
 import spacy 
 from string import punctuation
 
+from langchain.schema import HumanMessage, AIMessage
+
 import torch
 from transformers import AutoModelForSequenceClassification, AutoModelForCausalLM,\
     AutoTokenizer
+    
+from langdetect import detect, DetectorFactory
+from langdetect.lang_detect_exception import LangDetectException
+
+DetectorFactory.seed = 0
 
 spacy_nlp = spacy.load('en_core_web_sm')
 random.seed(0)
@@ -72,10 +83,14 @@ def avoid_word(text, word):
         'new_text': new_text
     }
 def avoid_the_forward(text): return avoid_word(text, 'the')
+def eval_avoid_the_forward(text, text_gt):
+    if re.search(r'\bthe\b', text, flags=re.IGNORECASE):
+        return 0
+    return 1
 
 
 ## backward
-def include_word_forward(text):
+def include_word_forward(text, return_meta=False):
     words = re.findall(r'\b\w+\b', text.lower())
     
     # Count word frequencies
@@ -89,10 +104,18 @@ def include_word_forward(text):
                                 f'"{most_common_word}" shows up {freq} times in the text, more than any other word. Use it.',
                                 f'Your response should contain the word "{most_common_word}", which has the highest frequency: {freq} times.'])
     
-    return {
-        'description': description,
-        'new_text': text
-    }
+    if return_meta:
+        return {'description': description, 'new_text': text, 'meta': word_counts}
+    else:
+        return {'description': description, 'new_text': text}
+def eval_include_word_forward(text, text_gt):
+    most_common_word, freq = include_word_forward(text, return_meta=True)['meta'].most_common(1)[0]
+    most_common_word_gt, freq_gt = include_word_forward(text_gt, return_meta=True)['meta'].most_common(1)[0]
+    if most_common_word == most_common_word_gt and \
+        freq == freq_gt:
+        return 1
+    else:
+        return 0
 
 
 # replace word
@@ -117,7 +140,10 @@ def replace_word(text, old, new):
         'new_text': new_text
     }
 def replace_and_ampersand_forward(text): return replace_word(text, 'and', '&')
-
+def eval_replace_and_ampersand_forward(text, text_gt):
+    if re.search(r'\band\b', text, flags=re.IGNORECASE):
+        return 0
+    return 1
 
 # one word per line
 ## forward
@@ -133,6 +159,9 @@ def one_word_per_line_forward(text):
                     ),
         'new_text': '\n'.join(text.split())
     }
+def eval_one_word_per_line_forward(text, text_gt):
+    expected_text = '\n'.join(text.split())
+    return 1 if text.strip() == expected_text.strip() else 0
 
 
 # use multiple spaces
@@ -150,6 +179,18 @@ def use_multiple_spaces_forward(text):
                     ),
         'new_text': re.sub(r' +', ' ' * n, text)
     }
+def eval_use_multiple_spaces_forward(text, text_gt):
+    space_groups = re.findall(r'(?<=\S)( +)(?=\S)', text)
+    
+    if not space_groups:
+        return 1
+    
+    space_counts = {len(group) for group in space_groups}
+    
+    if len(space_counts) == 1 and space_counts.pop() in {2, 3, 4}:
+        return 1
+    else:
+        return 0
 
 
 # upper case
@@ -166,10 +207,15 @@ def upper_case_forward(text):
                 ),
         'new_text': text.upper()
     }
+def eval_upper_case_forward(text, text_gt):
+    if text == text.upper():
+        return 1
+    else:
+        return 0
     
 ## backward
-def upper_case_backward(text):
-    upper_case_words = [word for word in text.split() if word.isupper()]
+def upper_case_backward(text, return_meta=False):
+    upper_case_words = [word for word in text.split() if word.strip(punctuation).isupper()]
     if upper_case_words:
         description = random.choice(
                     [f'Always use these words in uppercase: {"".join(upper_case_words[:3])}',
@@ -179,16 +225,21 @@ def upper_case_backward(text):
                     f'Ensure that {"".join(upper_case_words[:3])} are written entirely in capital letters.',
                     f'These words must be capitalized fully: {"".join(upper_case_words[:3])}']
                 )
-        new_text = ''
-        for word in text.split():
-            if word.strip(punctuation).upper() in upper_case_words:
-                new_text += ' ' + word.upper()
-            else:
-                new_text += ' ' + word
-        new_text = new_text.strip()
+        new_text = text
     else:
         description, new_text = None, None
-    return {'description': description, 'new_text':new_text}
+    if return_meta:
+        return {'description': description, 'new_text':new_text, 'meta': upper_case_words[:3]}
+    else:
+        return {'description': description, 'new_text':new_text}
+
+def eval_upper_case_backward(text, text_gt):
+    upper_case_words = set(upper_case_backward(text, return_meta=True)['meta'])
+    upper_case_words_gt = set(upper_case_backward(text_gt, return_meta=True)['meta'])
+    if upper_case_words.issubset(upper_case_words_gt) and all(w.lower() not in text for w in upper_case_words):
+        return 1
+    else:
+        return 0
 
 
 # lower case
@@ -205,6 +256,11 @@ def lower_case_forward(text):
                     ),
         'new_text': text.lower()
     }
+def eval_lower_case_forward(text, text_gt):
+    if text == text.upper():
+        return 1
+    else:
+        return 0
 
 
 # title case
@@ -221,10 +277,15 @@ def title_case_forward(text):
                 ),
         'new_text': text.title()
     }
+def eval_title_case_forward(text, text_gt):
+    if text == text.title():
+        return 1
+    else:
+        return 0
 
 ## backward
 def title_case_backward(text):
-    upper_case_words = [word for word in text.split() if word.istitle()]
+    upper_case_words = [word for word in text.split() if word.strip(punctuation).istitle()]
     if upper_case_words:
         description = random.choice(
                     [f'Always use these words in title case: {"".join(upper_case_words[:3])}',
@@ -234,16 +295,17 @@ def title_case_backward(text):
                     f'Ensure that each of the following words is in title case: {"".join(upper_case_words[:3])}',
                     f'These words must appear in title case format: {"".join(upper_case_words[:3])}']
                 )
-        new_text = ''
-        for word in text.split():
-            if word.strip(punctuation).title() in upper_case_words:
-                new_text += ' ' + word.title()
-            else:
-                new_text += ' ' + word
-        new_text = new_text.strip()
+        new_text = text
     else:
         description, new_text = None, None
-    return {'description': description, 'new_text':new_text}
+    return {'description': description, 'new_text':new_text, 'meta': upper_case_words}
+def eval_title_case_backward(text, text_gt):
+    title_case_words = set(title_case_backward(text, return_meta=True)['meta'])
+    title_case_words_gt = set(title_case_backward(text_gt, return_meta=True)['meta'])
+    if title_case_words.issubset(title_case_words_gt):
+        return 1
+    else:
+        return 0
 
 
 # sentence per line
@@ -261,6 +323,13 @@ def sentences_per_line_forward(text):
             ),
         'new_text': "\n".join(sentences)
     }
+def eval_sentences_per_line_forward(text, text_gt):
+    lines = text.strip().split('\n')
+
+    for line in lines:
+        if line.strip() and line.strip()[-1] not in '.!?':
+            return 0
+    return 1
 
 
 # commas to semicolon
@@ -277,6 +346,12 @@ def commas_to_semicolons_forward(text):
                 ),
         'new_text': text.replace(",", ";")
     }
+def eval_commas_to_semicolons_forward(text, text_gt):
+    if ', ' in text:
+        return 0
+    else:
+        return 1
+        
 
 
 # change full stops to exclamation marks
@@ -293,6 +368,11 @@ def full_stops_to_exclamation_marks_forward(text):
                 ),
         'new_text': re.sub(r'\.([ \n])', r'!\1', text)
     }
+def eval_full_stops_to_exclamation_marks_forward(text, text_gt):
+    if '.' in text:
+        return 0
+    else:
+        return 1
 
 
 # add line numbers
@@ -310,22 +390,51 @@ def add_line_numbers_forward(text):
                 ),
         'new_text': "\n".join(f"{i+1}: {line}" for i, line in enumerate(lines))
     }
+def eval_add_line_numbers_forward(text, text_gt):
+    lines = text.splitlines()
+
+    for line in lines:
+        if not re.match(r'^\d+[\:\.\)\-]\s', line):
+            return 0
+    return 1
+
+
+## backward
+def contains_list_or_enumeration_forward(text, return_meta=False):
+    pattern = re.compile(r'^(?:(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|one|two|three|four|five|siz|seven|eight|nine|ten)\b|\d+[\.\)\:](?=\s|$))', re.IGNORECASE)
     
-def contains_list_or_enumeration_forward(text):
-    if (re.match(r"\b(first|second|third|one|two|three|1\.|2\.|3\.)\b", text, re.IGNORECASE)):
-        description = random.choice(
-                    ['Use line numbers or enumeration in your reasoning process.',
-                    'Structure your reasoning with numbered steps or lines.',
-                    'Include line numbers or use a numbered list when explaining.',
-                    'Present your reasoning in an enumerated or line-numbered format.',
-                    'Break down your reasoning into numbered parts or steps.',
-                    'Organize your explanation using enumeration or line numbers.']
-                )
+    lines = text.splitlines()
+    all_lines_enumerated = True
+    for line in lines:
+        if not line.strip():
+            continue
+        if not pattern.match(line.lower().strip()):
+            all_lines_enumerated = False  
+            break
+            
+    if all_lines_enumerated:
+        description = random.choice([
+            'Use line numbers or enumeration in your reasoning process.',
+            'Structure your reasoning with numbered steps or lines.',
+            'Include line numbers or use a numbered list when explaining.',
+            'Present your reasoning in an enumerated or line-numbered format.',
+            'Break down your reasoning into numbered parts or steps.',
+            'Organize your explanation using enumeration or line numbers.'
+        ])
         new_text = text
     else:
         description, new_text = None, None
-    return {'description': description, 'new_text': new_text}
 
+    if return_meta:
+        return {'description': description, 'new_text': new_text, 'meta': new_text is not None}
+    else:
+        return {'description': description, 'new_text': new_text}
+def eval_contains_list_or_enumeration_forward(text, text_gt):
+    if contains_list_or_enumeration_forward(text, return_meta=True)['meta']\
+        == contains_list_or_enumeration_forward(text_gt, return_meta=True)['meta']:
+        return 1
+    else:   
+        return 0
 
 
 # format the paragraphs as json
@@ -344,6 +453,22 @@ def json_of_paragraphs_forward(text):
                 ),
         'new_text': json.dumps(json_obj)
     }
+def eval_json_of_paragraphs_forward(text, text_gt):
+    try:
+        parsed_json = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return 0
+
+    if not isinstance(parsed_json, dict) or 'paragraphs' not in parsed_json:
+        return 0
+    
+    paragraphs = parsed_json['paragraphs']
+    
+    if not isinstance(paragraphs, list):
+        return 0
+    if not all(isinstance(p, str) for p in paragraphs):
+        return 0
+    return 1
 
 
 # bracket the sentences
@@ -361,6 +486,12 @@ def bracket_sentences_forward(text):
                 ),
         'new_text': " ".join("[" + s + "]" for s in sentences)
     }
+def eval_bracket_sentences_forward(text, text_gt):
+    pattern = r'^\[[^\[\]]+\](\s*\[[^\[\]]+\])*$'
+    
+    if re.fullmatch(pattern, text):
+        return 1
+    return 0
 
 
 # indent the paragraphs with a tab 
@@ -378,6 +509,13 @@ def indent_paragraphs_forward(text):
                 ),
         'new_text': "\n\n".join("\t" + p for p in paragraphs)
     }
+def eval_indent_paragraphs_forward(text, text_gt):
+    paragraphs = text.split("\n")
+    
+    for paragraph in paragraphs:
+        if paragraph.strip() and not paragraph.startswith("\t"):
+            return 0
+    return 1
 
 
 # highlight the logical words
@@ -394,6 +532,12 @@ def highlight_logical_words_forward(text):
                 ),
         'new_text': re.sub(rf'\b(hmm|wait|now|thus|therefore|so|consequently|alternatively|then|okay|alright|again|but|yes)\b', r'*\1*', text, flags=re.IGNORECASE)
     }
+def eval_highlight_logical_words_forward(text, text_gt):
+    unhighlighted_pattern = r'(?<!\*)\b(hmm|wait|now|thus|therefore|so|consequently|alternatively|then|okay|alright|again|but|yes)\b(?!\*)'
+    
+    if re.search(unhighlighted_pattern, text, flags=re.IGNORECASE):
+        return 0
+    return 1
 
 
 # separate sentences with a divider
@@ -411,6 +555,17 @@ def insert_sentence_divider_forward(text, divider=" | "):
                 ),
         'new_text': divider.join(sentences)
     }
+def eval_insert_sentence_divider_forward(text, text_gt, divider="|"):
+    parts = text.split(divider)
+    if len(parts) < 2:
+        return 0
+    for part in parts:
+        trimmed = part.strip()
+        if not trimmed:
+            return 0  
+        if trimmed[-1] not in '.!?':
+            return 0  
+    return 1
 
 
 # render the text as html
@@ -443,11 +598,19 @@ def render_as_html_forward(text):
                 ),
         'new_text': html_output
     }
-
+def eval_render_as_html_forward(html_text, text_gt):
+    parser = etree.HTMLParser()
+    try:
+        etree.parse(StringIO(html_text), parser)
+        if parser.error_log:
+            return 0  # There were parse errors
+        return 1
+    except Exception:
+        return 0
 
 # palindromes
 ## backward
-def palindromes_backward(text):
+def palindromes_backward(text, return_meta=False):
     words = text.split()
     palindromes = [
         word.strip(punctuation)
@@ -467,7 +630,17 @@ def palindromes_backward(text):
     else:
         new_text, description = None, None
         
-    return {'description': description, 'new_text': new_text}
+    if return_meta:
+        return {'description': description, 'new_text': new_text, 'meta': palindromes}
+    else:
+        return {'description': description, 'new_text': new_text}
+def eval_palindromes_backwards(text, text_gt):
+    palindromes = palindromes_backward(text, return_meta=True)['meta']
+    palindromes_gt = palindromes_backward(text_gt, return_meta=True)['meta']
+    if set(palindromes).issubset(palindromes_gt):
+        return 1
+    else:
+        return 0
 
 
 # common hypernyms
@@ -523,7 +696,7 @@ def analyze_nouns_common_hypernyms(text):
 
     return hypernym_map
 
-def hypernyms_backward(text):
+def hypernyms_backward(text, return_meta=False):
     hypernym_map = analyze_nouns_common_hypernyms(text)
     if hypernym_map:
         noun_type, nouns = random.sample(list(hypernym_map.items()), 1)[0]
@@ -538,12 +711,25 @@ def hypernyms_backward(text):
         new_text = text
     else:
         description, new_text = None, None
-    return {'description': description, 'new_text': new_text}
+    if return_meta:
+        return {'description': description, 'new_text': new_text, 'meta': hypernym_map}
+    else:
+        return {'description': description, 'new_text': new_text}
+def eval_hypernyms_backward(text, text_gt):
+    hypernym_map = hypernyms_backward(text, return_meta=True)['meta']
+    hypernym_map_gt = hypernyms_backward(text_gt, return_meta=True)['meta']
+    
+    noun_type, nouns = random.sample(list(hypernym_map.items()), 1)[0]
+    noun_type_gt, nouns_gt = random.sample(list(hypernym_map_gt.items()), 1)[0]
+    if noun_type == noun_type_gt and set(nouns).issubset(set(nouns_gt)):
+        return 1
+    else:
+        return 0
 
 
 # paragraph count
 ## backward
-def paragraph_count_backward(text):
+def paragraph_count_backward(text, return_meta=False):
     paras = [p.strip() for p in text.split('\n') if p.strip()]
     if len(paras) > 0:
         description = random.choice(
@@ -557,7 +743,17 @@ def paragraph_count_backward(text):
         new_text = text
     else:
         description, new_text = None, None
-    return {'description': description, 'new_text': new_text}
+    if return_meta:
+        return {'description': description, 'new_text': new_text, 'meta': len(paras)}
+    else:
+        return {'description': description, 'new_text': new_text}
+def eval_paragraph_count_backward(text, gt_text):
+    num_paras = paragraph_count_backward(text, return_meta=True)['meta']
+    num_paras_gt = paragraph_count_backward(gt_text, return_meta=True)['meta']
+    if num_paras == num_paras_gt:
+        return 1
+    else:
+        return 0
 
 
 # translation
@@ -591,11 +787,18 @@ def translate_forward(text, model_and_tokenizer):
                         f'Use only "{LANG_CODE_TO_NAME[tgt_lang]}" in your chain of reasoning—no code-switching.']
                     ),
             'new_text': translated_text}
-
+def eval_translate_forward(text, text_gt):
+    try:
+        lang1 = detect(text)
+        lang2 = detect(text_gt)
+        return int(lang1 == lang2)
+    except LangDetectException:
+        return 0
+    
 
 # replace words with emojis
 ## forward
-def replace_words_with_emojis(text):
+def replace_words_with_emojis(text, return_meta=False):
     emoji_map = {
         'error': '❌',
         'warning': '⚠️',
@@ -645,22 +848,97 @@ def replace_words_with_emojis(text):
                     "Substitute the words {} with the matching emojis {} during your explanation.".format(list(replaced.keys()), list(replaced.values())),
                     "Convert the words {} into these emojis {} in your reasoning chain.".format(list(replaced.keys()), list(replaced.values()))]
                 )
-    
-    return {'description': description, 'new_text': new_text}
+    if return_meta:
+        return {'description': description, 'new_text': new_text, 'meta': replaced}
+    else:
+        return {'description': description, 'new_text': new_text}
+def eval_replace_words_with_emojis(text, text_gt):    
+    replaced = replace_words_with_emojis(text, return_meta=True)['meta']
+    replaced_gt = replace_words_with_emojis(text, return_meta=True)['meta']
+    if set(replaced).issubset(set(replaced_gt)):
+        return 1
+    else:
+        return 0
 
 
 # Qwen's autoif
 def timeout_handler(signum, frame):
     raise TimeoutError("Function execution timed out")
 
+def call_api(
+    llm,
+    messages: list[HumanMessage] = None,
+    *,
+    prompt: str = None,
+    max_retries: int = 8,
+    backoff_factor: float = 4.0,
+    max_sleep: float = 260.0,
+    **llm_kwargs
+) -> str:
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            ai_msg: AIMessage = llm(messages=messages, **llm_kwargs)
+            return ai_msg.content
+
+        except httpx.HTTPStatusError as e:
+            status = e.response.status_code
+            headers = e.response.headers
+
+            # Rate limit
+            if status == 429:
+                raw = headers.get("Retry-After")
+                if raw:
+                    sleep_t = min(float(raw), max_sleep)
+                else:
+                    sleep_t = min(backoff_factor * 2 ** (attempt - 1) + random.random(), max_sleep)
+                print(f"[429] rate limited – sleeping {sleep_t:.1f}s (try {attempt})")
+                time.sleep(sleep_t)
+                continue
+
+            # Server errors (including 504)
+            if 500 <= status < 600:
+                sleep_t = min(backoff_factor * 2 ** (attempt - 1) + random.random(), max_sleep)
+                print(f"[{status}] server error – sleeping {sleep_t:.1f}s (try {attempt})")
+                time.sleep(sleep_t)
+                continue
+
+            # Other HTTP errors are not retriable
+            raise
+
+        except (httpx.TransportError, httpx.TimeoutException) as e:
+            # network glitch or timeout
+            sleep_t = min(backoff_factor * 2 ** (attempt - 1) + random.random(), max_sleep)
+            print(f"[Network/Timeout] {e!r} – sleeping {sleep_t:.1f}s (try {attempt})")
+            time.sleep(sleep_t)
+            continue
+
+        except Exception:
+            # anything else, give up
+            raise
+
+    raise RuntimeError(f"API call failed after {max_retries} attempts")
+
 class AutoIf:
     def __init__(self):
-        self.tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-72B-Instruct")
-        self.model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-72B-Instruct", device_map="auto").half().eval()
+        # self.tokenizer = AutoTokenizer.from_pretrained("deepseek-ai/DeepSeek-R1-Distill-Llama-8B")
+        # self.model = AutoModelForCausalLM.from_pretrained("deepseek-ai/DeepSeek-R1-Distill-Llama-8B", device_map="auto").half().eval()
         
         self.tokenizer_nli = AutoTokenizer.from_pretrained("MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7")
         self.model_nli = AutoModelForSequenceClassification.from_pretrained("MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7").eval().cuda()
         
+        # self.llm_openai = ChatOpenAI(
+        #     model="meta-llama/Llama-3.3-70B-Instruct",
+        #     temperature=0,
+        #     max_tokens=15000,
+        #     openai_api_base="https://fmapi.swissai.cscs.ch",
+        # )
+        self.llm_openai = ChatOpenAI(
+            model="gpt-4o-mini",
+            temperature=0.8,
+            max_tokens=15000,
+        )
+
         self.seed_instructions = [each.strip() for each in open("/share/u/harshraj/CotIF/data/seed_instruction.txt").readlines()]
         self.generated_eval_functions = []
         self.filtered_generated_eval_functions = []
@@ -670,48 +948,65 @@ class AutoIf:
         self.filtered_generated_responses = []
         self.filtered2_generated_responses = []
         
-    def compile(self, text):
-        self.generate_seed()
-        self.generate_eval_function()
-        self.filter_generated_eval_function()
-        self.generate_instruction()
-        self.filter_generated_instruction()
-        self.generate_response(text)
-        self.filter_generated_response()
-        self.filter2_generated_response()
-        return self.filtered2_generated_responses
-        
-    def generate_seed(self, k=2):
+    def compile(self, dataset):
+        output = []
+        for datum in dataset:
+            messages = datum["conversations"]
+            if len(messages) > 1 and messages[0]["from"] == "user" and messages[1]["from"] == "assistant":
+                query, r1_generated_text = messages[0]["value"], messages[1]["value"]
+                self.seed_instructions = self.generate_seed(self.seed_instructions)
+                self.generated_eval_functions = self.generate_eval_function(self.seed_instructions)
+                self.filtered_generated_eval_functions = self.filter_generated_eval_function(self.generated_eval_functions)
+                self.generated_instructions = self.generate_instruction(self.filtered_generated_eval_functions)
+                self.filtered_generated_instructions = self.filter_generated_instruction(self.generated_instructions)
+                self.generated_responses = self.generate_response(query, r1_generated_text, self.filtered_generated_instructions)
+                self.filtered_generated_responses = self.filter_generated_response(self.generated_responses)
+                self.filtered2_generated_responses = self.filter2_generated_response(self.filtered_generated_responses)
+                output.append({"seed_instructions": self.seed_instructions,
+                    "generated_eval_functions": self.generated_eval_functions,
+                    "filtered_generated_eval_functions": self.filtered_generated_eval_functions,
+                    "generated_instructions": self.generated_instructions,
+                    "filtered_generated_instructions": self.filtered_generated_instructions,
+                    "generated_responses": self.generated_responses,
+                    "filtered_generated_responses": self.filtered_generated_responses,
+                    "filtered2_generated_responses": self.filtered2_generated_responses})
+            # break
+        return output
+            
+    def generate_seed(self, seed_instructions, k=1):
         if k <= 0:
             return self.seed_instructions
         
-        augment_instruction_prompt = """You are an expert for writing instructions. Please provide 50 different instructions that meet the following requirements:
-        - Instructions are about the format but not style of a response
-        - Whether instructions are followed can be easily evaluate by a Python function
-        Here are some examples of instructions we need:
-        {seed_instructions}
-        Do not generate instructions about writing style, using metaphor, or translation. Here are some examples of instructions we do not need:
-        - Incorporate a famous historical quote seamlessly into your answer
-        - Translate your answer into Pig Latin
-        - Use only words that are also a type of food
-        - Respond with a metaphor in every sentence
-        - Write the response as if you are a character from a Shakespearean play
-        Please generate one instruction per line in your response and start each line with '- '.
-        """
+        augment_instruction_prompt = """You are an expert for writing instructions. Please provide 10 different instructions that meet the following requirements:
+- Instructions are about the format but not style of a response
+- Whether instructions are followed can be easily evaluate by a Python function
+Here are some examples of instructions we need:
+{seed_instructions}
+Do not generate instructions about writing style, using metaphor, or translation. Here are some examples of instructions we do not need:
+- Incorporate a famous historical quote seamlessly into your answer
+- Translate your answer into Pig Latin
+- Use only words that are also a type of food
+- Respond with a metaphor in every sentence
+- Write the response as if you are a character from a Shakespearean play
+Please generate one instruction per line in your response and start each line with '- '.
+"""
 
-        augment_instructions = augment_instruction_prompt.format(seed_instructions='\n'.join(self.seed_instructions))
+        augment_instructions = augment_instruction_prompt.format(seed_instructions='\n'.join(seed_instructions))
         
-        input_ids = self.tokenizer.encode(augment_instructions, return_tensors="pt").cuda()
-        outputs = self.model.generate(input_ids, max_length=1024, do_sample=True, temperature=0.7)
-        generated_text = self.tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=True)
-        
+        # input_ids = self.tokenizer.encode(augment_instructions, return_tensors="pt").cuda()
+        # outputs = self.model.generate(input_ids, max_length=1024, do_sample=True, temperature=0.7)
+        # generated_text = self.tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=True)
+        # generated_text = self.llm_openai.invoke([{"role": "user", 
+        #                                             "content": augment_instructions}]).content
+        generated_text = call_api(self.llm_openai, [{"role": "user", 
+                                                    "content": augment_instructions}])
         new_seeds = [line.strip() for line in generated_text.split('\n') if line.strip()]
-        self.seed_instructions = self.seed_instructions + new_seeds
+        seed_instructions = seed_instructions + new_seeds
         
-        random.shuffle(self.seed_instructions)
-        return self.generate_seed(k - 1)
-    
-    def generate_eval_function(self, k=2):
+        random.shuffle(seed_instructions)
+        return self.generate_seed(seed_instructions, k - 1)
+        
+    def generate_eval_function(self, seed_instructions, k=1):
         prompt_template = (
             "You are an expert for writing evaluation functions in Python to evaluate whether a response strictly follows an instruction.\n"
             "Here is the instruction: {instruction}\n"
@@ -722,55 +1017,66 @@ class AutoIf:
             "Here is an example of output JSON format: {{\"func\": JSON_STR(use only \\n instead of \n), \"cases\": [{{\"input\": str, \"output\": str}}]}}."
         )
 
-        for instruction in self.seed_instructions:
+        for instruction in seed_instructions:
             prompt = prompt_template.format(instruction=instruction)
+            self.generated_eval_functions.append({
+                "prompt": prompt,
+                "instruction": instruction,
+                "gpt-answer": []
+            })
             for _ in range(k):
-                input_ids = self.tokenizer.encode(prompt, return_tensors="pt").cuda()
-                outputs = self.model.generate(input_ids, max_length=1024, do_sample=True, temperature=0.7)
-                generated_text = self.tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=True)
-                self.generated_eval_functions.append({
-                    "prompt": prompt,
-                    "instruction": instruction,
-                    "gpt-answer": generated_text
-                })
+                # tokens = encoding.encode(prompt)
+                # print("Number of tokens:", len(tokens))
+                # generated_text = self.llm_openai.invoke([{"role": "user", "content": prompt}]).content
+                generated_text = call_api(self.llm_openai, [{"role": "user", "content": prompt}])
+                self.generated_eval_functions[-1]['gpt-answer'].append(generated_text)
+        return self.generated_eval_functions
                 
-    def filter_generated_eval_function(self):
-        collect_packages = []
-        for result in self.generated_eval_functions:
+    def filter_generated_eval_function(self, generated_eval_functions):
+        collect_packages, count = [], 0
+        for result in generated_eval_functions:
             res = result['gpt-answer']
             eval_funcs, test_cases = [], []
             for each in res:
                 try:
-                    json_dict = re.findall(r'```json(.*?)```', each, re.DOTALL)[0].strip()
-                except IndexError:
+                    json_dict = re.findall(r'```json(.*?)```', each, re.DOTALL)[0].strip().replace("\n", "")
+                except Exception as e:
+                    count += 1
+                    print("Skipping because of index error:", e)
                     continue
                 try:
                     res_dict = json.loads(json_dict)
-                except json.JSONDecodeError:
+                except Exception as e:
+                    count += 1
+                    print("skipping because of JSON load error:", e)
                     continue
                 func = res_dict['func']
                 if '\\n' in func:
                     func = func.replace('\\n', '\n')
                 try:
                     exec(func)
-                except Exception:
+                except Exception as e:
+                    count += 1
+                    print("Error executing eval function:", e)
                     continue
                 for line in func.split('\n'):
                     if 'import' in line or 'download' in line or 'requests' in line:
                         collect_packages.append(line)
         print(list(set(collect_packages)))
 
-        for result in tqdm(self.generated_eval_functions):
+        for result in tqdm(generated_eval_functions):
             res = result['gpt-answer']
             eval_funcs, test_cases = [], []
             for each in tqdm(res):
                 try:
-                    json_dict = re.findall(r'```json(.*?)```', each, re.DOTALL)[0].strip()
-                except IndexError:
+                    json_dict = re.findall(r'```json(.*?)```', each, re.DOTALL)[0].strip().replace("\n", "")
+                except Exception as e:
+                    print("Skipping because of index error:", e)
                     continue
                 try:
                     res_dict = json.loads(json_dict)
-                except json.JSONDecodeError:
+                except Exception as e:
+                    print("Skipping as JSON load error:", e)
                     continue
 
                 # func rejection and cleaning
@@ -778,7 +1084,8 @@ class AutoIf:
                 func = '\n'.join([line for line in func.split('\n') if 'download' not in line and 'requests' not in line])
                 try:
                     exec(func)
-                except Exception:
+                except Exception as e:
+                    print("Error executing eval function:", e)
                     continue
                 eval_funcs.append(func)
 
@@ -790,9 +1097,10 @@ class AutoIf:
 
             eval_funcs = list(set(eval_funcs))
             test_cases = list(map(json.loads, set(map(json.dumps, test_cases))))
-            if len(eval_funcs) < 3 or len(test_cases) < 10:
-                continue
-
+            
+            # if len(eval_funcs) < 3 or len(test_cases) < 10:
+            #     continue
+            
             filtered_test_cases = []
             for each in tqdm(test_cases):
                 flag = False
@@ -800,16 +1108,19 @@ class AutoIf:
                     local_vars = {}
                     try:
                         exec(func, globals(), local_vars)
-                    except Exception:
+                    except Exception as e:
+                        print("Error executing eval function:", e)
                         continue
                     if 'evaluate' not in local_vars:
+                        print("skipping because evaluate not in local_vars")
                         continue
                     eval_func = local_vars['evaluate']
                     try:
                         signal.signal(signal.SIGALRM, timeout_handler)
                         signal.alarm(5)
                         res_val = eval_func(each[0])
-                    except Exception:
+                    except Exception as e:
+                        print("Error executing eval function:", e)
                         res_val = None
                     finally:
                         signal.alarm(0)
@@ -817,15 +1128,18 @@ class AutoIf:
                         flag = True
                 if flag:
                     filtered_test_cases.append(each)
-
+                else:
+                    print("skipping because flag is False")
             scored_funcs = []
             for func in tqdm(eval_funcs):
                 local_vars = {}
                 try:
                     exec(func, globals(), local_vars)
-                except Exception:
+                except Exception as e:
+                    print("Error executing eval function:", e)
                     continue
                 if 'evaluate' not in local_vars:
+                    print("skipping because evaluate not in local_vars")
                     continue
                 eval_func = local_vars['evaluate']
                 acc = []
@@ -834,7 +1148,8 @@ class AutoIf:
                         signal.signal(signal.SIGALRM, timeout_handler)
                         signal.alarm(5)
                         res_val = eval_func(inp)
-                    except Exception:
+                    except Exception as e:
+                        print("Error executing eval function:", e)
                         res_val = None
                     finally:
                         signal.alarm(0)
@@ -846,20 +1161,23 @@ class AutoIf:
                 scored_funcs.append((func, acc))
             valid_funcs = [each for each in scored_funcs if each[1] >= 0.8]
             if not valid_funcs:
+                print("not valid funcs")
                 continue
-
+            else:
+                print("valid funcs")
+            
             self.filtered_generated_eval_functions.append({
                 "instruction": result['instruction'],
                 "eval_func": valid_funcs,
                 "cases": filtered_test_cases
             })
-            
+        return self.filtered_generated_eval_functions
 
-    def generate_instruction(self, k=2):
+    def generate_instruction(self, filtered_generated_eval_functions, k=2):
         count = 0
         filter_count = 0
 
-        for line in tqdm(self.filtered_generated_eval_functions, desc="Generating back-translated instructions"):
+        for line in tqdm(filtered_generated_eval_functions, desc="Generating back-translated instructions"):
             funcs = line["eval_func"][:3]
 
             instruction_prompt = f"""You are an expert in converting the Python eval function code into the corresponding instruction text. I will provide the eval function code. Please strictly follow the code to convert it into the corresponding instruction text. Here's an example: 
@@ -869,29 +1187,28 @@ class AutoIf:
 ["Answer without using any words that contain the letter 'E'.","Answer with words that do not contain the letter 'E'.","Answer with words that do not contain the letter 'E'."] Please convert the following eval function into instructions stored in a list: 
 
 {funcs}"""
-
             for _ in range(k):
-                input_ids = self.tokenizer.encode(instruction_prompt, return_tensors="pt").cuda()
-                outputs = self.model.generate(input_ids, max_length=1024, do_sample=True, temperature=0.7)
-                generated_text = self.tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=True)
-
+                # input_ids = self.tokenizer.encode(instruction_prompt, return_tensors="pt").cuda()
+                # outputs = self.model.generate(input_ids, max_length=1024, do_sample=True, temperature=0.7)
+                # generated_text = self.tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=True)
+                # generated_text = self.llm_openai.invoke([{"role": "user", "content": instruction_prompt}]).content
+                generated_text= call_api(self.llm_openai, [{"role": "user", "content": instruction_prompt}])
                 try:
                     back_instruction = json.loads(generated_text)
                     break
                 except Exception:
                     filter_count += 1
                     continue
-
             line["back_instruction"] = back_instruction
             self.generated_instructions.append(line)
             count += 1
+        return self.generated_instructions
             
-
-    def filter_generated_instruction(self):
+    def filter_generated_instruction(self, generated_instructions):
         count = 0 
         filter_count = 0
 
-        for line in tqdm(self.generated_instructions, desc="Filtering back-translated instructions"):
+        for line in tqdm(generated_instructions, desc="Filtering back-translated instructions"):
             back_instructions = line["back_instruction"]
             ori_ins = line["instruction"]
 
@@ -899,7 +1216,6 @@ class AutoIf:
             for back_ins in back_instructions[:3]:
                 premise = ori_ins
                 hypothesis = back_ins
-
                 inputs = self.tokenizer_nli(premise, hypothesis, truncation=True, return_tensors="pt")
                 output = self.model_nli(inputs["input_ids"].cuda())
                 prediction = torch.softmax(output["logits"][0], -1).tolist()
@@ -915,32 +1231,37 @@ class AutoIf:
             else:
                 self.filtered_generated_instructions.append(line)
             count += 1
+        return self.filtered_generated_instructions
             
-    def generate_response(self, text, k=2):
-        for instruction in self.filtered_generated_instructions:
+    def generate_response(self, query, r1_generated_text, filtered_generated_instructions, k=2):
+        for instruction in filtered_generated_instructions:
             prompt = (
                 f"Please answer the query strictly following the instruction.\n"
                 f"[instruction] {instruction['instruction']}\n"
-                f"[Query] {text}"
+                f"[Query] {query}"
             )
-            
             responses = []
             for _ in range(k):
-                input_ids = self.tokenizer.encode(prompt, return_tensors="pt").cuda()
-                outputs = self.model.generate(input_ids, max_length=1024, do_sample=True, temperature=0.7)
-                generated_text = self.tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=True)
+                generated_text = call_api(self.llm_openai, [{"role": "user", 
+                                                          "content": (f"{r1_generated_text}\n"
+                                                                    f"Re-write the above text following: {instruction['instruction']}\n\n"
+                                                                    f"Note: Use the same words and sentences but re-arrange them in a way that strictly follows the instruction.\n")}])
+                # generated_text = self.llm_openai.invoke([{"role": "user", 
+                #                                           "content": (f"{r1_generated_text}\n"
+                #                                                     f"Re-write the above text following: {instruction['instruction']}\n\n"
+                #                                                     f"Note: Use the same words and sentences but re-arrange them in a way that strictly follows the instruction.\n")}]).content
                 responses.append(generated_text)
-            
             self.generated_responses.append({
                 "instruction": instruction['instruction'],
                 "prompt": prompt,
                 "gpt-answer": responses,
                 "eval_func": instruction["eval_func"],
             })
-                
-    def filter_generated_response(self):
+        return self.generated_responses
+              
+    def filter_generated_response(self, generated_responses):
         filtered_samples = []
-        for result in tqdm(self.generated_responses, desc="Filtering back translated responses"):
+        for result in tqdm(generated_responses, desc="Filtering back translated responses"):
             eval_funcs = []
             for func, score in result['eval_func']:
                 local_vars = {}
@@ -981,14 +1302,17 @@ class AutoIf:
                     filtered_samples.append({
                         'instruction': result['instruction'],
                         'query': query,
-                        'response': each
+                        'response': each,
+                        'prompt': result['prompt'],
+                        "eval_func": result['eval_func'],
                     })
                 except IndexError:
                     print("Prompt extraction error:", result['prompt'])
         
         self.filtered_generated_responses = list(map(json.loads, set(map(json.dumps, filtered_samples))))
+        return self.filtered_generated_responses
         
-    def filter2_generated_response(self, k=2): 
+    def filter2_generated_response(self, filtered_generated_responses, k=2): 
         prompt_template = (
             "You are an expert that is good at judging whether a response is following the instruction and query.\n"
             "[Instruction] {instruction}\n"
@@ -999,24 +1323,26 @@ class AutoIf:
             "Scoring 0 means the response is totally unrelated to the query, while scoring 10 means the response is helpful and highly related to the query.\n"
             "Please only provide a score in the format `Score: {{score}}` without any other contents at the last line."
         )
-        for each in self.filtered_generated_responses:
-            each['prompt'] = prompt_template.format(
-                instruction=each['instruction'],
-                query=each['query'],
-                response=each['response']
-            )
+        for each in filtered_generated_responses:
             each['gen'] = []
             for _ in range(k):
-                input_ids = self.tokenizer.encode(each['prompt'], return_tensors="pt").cuda()
-                outputs = self.model.generate(input_ids, max_length=1024, do_sample=True, temperature=0.7)
-                generated_text = self.tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=True)
+                # input_ids = self.tokenizer.encode(each['prompt'], return_tensors="pt").cuda()
+                # outputs = self.model.generate(input_ids, max_length=1024, do_sample=True, temperature=0.7)
+                # generated_text = self.tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=True)
+                generated_text = call_api(self.llm_openai, [{"role": "user", "content": prompt_template.format(
+                                                                                            instruction=each['instruction'],
+                                                                                            query=each['query'],
+                                                                                            response=each['response']
+                                                                                        )}])
+                # generated_text = self.llm_openai.invoke([{"role": "user", "content": each['prompt']}])
                 each['gen'].append(generated_text)
             
             scores = []
-            for each in each['gen']:
-                score = re.findall(r'Score: (\d+?)$', each)
+            for gen in each['gen']:
+                score = re.findall(r'Score: (\d+?)$', gen)
                 if score:
                     scores.append(int(score[0]))
             score = np.mean(scores) if scores else 0
-            if score > 8: # quality score
+            if score > 5: # quality score
                 self.filtered2_generated_responses.append(each)
+        return self.filtered2_generated_responses

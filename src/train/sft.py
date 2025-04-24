@@ -1,7 +1,8 @@
 """
 screen -S myexperiment
-accelerate launch --num_processes 2 sft.py --config sft.yaml
+accelerate launch --num_processes 8 sft.py --config sft.yaml
 """
+
 from dataclasses import dataclass
 from datetime import datetime
 from distutils.util import strtobool
@@ -11,12 +12,11 @@ import re
 from typing import Optional
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed, BitsAndBytesConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import is_liger_kernel_available
-from trl import SFTTrainer, TrlParser, ModelConfig, SFTConfig, get_peft_config
+from trl import SFTTrainer, TrlParser, ModelConfig, SFTConfig
 from datasets import load_dataset
-from peft import AutoPeftModelForCausalLM
 
 if is_liger_kernel_available():
     from liger_kernel.transformers import AutoLigerKernelForCausalLM
@@ -79,7 +79,6 @@ def setup_model_for_spectrum(model, spectrum_config_path):
             
     return model
 
-###########################################################################################################
 
 def train_function(model_args: ModelConfig, script_args: ScriptArguments, training_args: SFTConfig):
     """Main training function."""
@@ -98,15 +97,7 @@ def train_function(model_args: ModelConfig, script_args: ScriptArguments, traini
     else:
         train_dataset = load_dataset(script_args.dataset_id_or_path, split=script_args.dataset_splits)
     
-    # # Remove data points whose CoT is longer than the max sequence length.
-    # n_before_filtering = len(train_dataset)
-    # # NB: This will still cut off some sequences (since the full seq doesn't have only the CoT, but also the prompt and the visible response).
-    # train_dataset = train_dataset.filter(lambda x: x['cot_length'] <= training_args.max_seq_length)
-    # n_after_filtering = len(train_dataset)
-    # logger.info(f'Filtered {n_before_filtering - n_after_filtering} samples that were too long.')
-
     # Select a sample of the required size.
-    # train_dataset = train_dataset.shuffle(seed=42)
     if script_args.num_samples is not None:
         train_dataset = train_dataset.select(range(script_args.num_samples))
     
@@ -118,8 +109,7 @@ def train_function(model_args: ModelConfig, script_args: ScriptArguments, traini
     ################
 
     ########################
-    # Function adeed by Bob:
-    # IMPORTANT for the DeepSeek-R1 models: the chat template strips out the CoT before training, which is bad!
+    # DeepSeek-R1 models: the chat template strips out the CoT before training, which is bad!
     # So we modify the Jinja2 template to not strip out the CoT.
     ########################
     def get_tokenizer_with_new_chat_template(tokenizer):
@@ -139,7 +129,6 @@ def train_function(model_args: ModelConfig, script_args: ScriptArguments, traini
         trust_remote_code=model_args.trust_remote_code,
     )
 
-    # Bob's edits:
     tokenizer = get_tokenizer_with_new_chat_template(tokenizer)
     tokenizer.padding_side = "right"
 
@@ -153,27 +142,13 @@ def train_function(model_args: ModelConfig, script_args: ScriptArguments, traini
     
     # define model kwargs
     model_kwargs = dict(
-        revision=model_args.model_revision, # What revision from Huggingface to use, defaults to main
-        trust_remote_code=model_args.trust_remote_code, # Whether to trust the remote code, this also you to fine-tune custom architectures
-        attn_implementation=model_args.attn_implementation, # What attention implementation to use, defaults to flash_attention_2
-        torch_dtype=model_args.torch_dtype if model_args.torch_dtype in ['auto', None] else getattr(torch, model_args.torch_dtype), # What torch dtype to use, defaults to auto
-        use_cache=False if training_args.gradient_checkpointing else True, # Whether
-        low_cpu_mem_usage=True if not strtobool(os.environ.get("ACCELERATE_USE_DEEPSPEED", "false")) else None,  # Reduces memory usage on CPU for loading the model
+        revision=model_args.model_revision, 
+        trust_remote_code=model_args.trust_remote_code,
+        attn_implementation=model_args.attn_implementation,
+        torch_dtype=model_args.torch_dtype if model_args.torch_dtype in ['auto', None] else getattr(torch, model_args.torch_dtype),
+        use_cache=False if training_args.gradient_checkpointing else True,
+        low_cpu_mem_usage=True if not strtobool(os.environ.get("ACCELERATE_USE_DEEPSPEED", "false")) else None,
     )
-    
-    # Check which training method to use and if 4-bit quantization is needed
-    if model_args.load_in_4bit: 
-        model_kwargs['quantization_config'] = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_quant_type='nf4',
-            bnb_4bit_compute_dtype=model_kwargs['torch_dtype'],
-            bnb_4bit_quant_storage=model_kwargs['torch_dtype'],
-        )
-    if model_args.use_peft:
-        peft_config = get_peft_config(model_args)
-    else:
-        peft_config = None
     
     # load the model with our kwargs
     if training_args.use_liger_kernel:
@@ -182,7 +157,7 @@ def train_function(model_args: ModelConfig, script_args: ScriptArguments, traini
         model = AutoModelForCausalLM.from_pretrained(model_args.model_name_or_path, **model_kwargs)
     training_args.distributed_state.wait_for_everyone()  # wait for all processes to load
 
-
+    # If using Spectrum, set up the model accordingly
     if script_args.spectrum_config_path:
         model = setup_model_for_spectrum(model, script_args.spectrum_config_path)
 
@@ -194,10 +169,15 @@ def train_function(model_args: ModelConfig, script_args: ScriptArguments, traini
         args=training_args,
         train_dataset=train_dataset,
         tokenizer=tokenizer,
-        peft_config=peft_config,
+        peft_config=None,  # No PEFT config for full fine-tuning
     )
-    if trainer.accelerator.is_main_process and peft_config:
-        trainer.model.print_trainable_parameters()
+
+    # For full fine-tuning, it's helpful to see the proportion of trainable parameters
+    if trainer.accelerator.is_main_process:
+        # Count trainable parameters
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        total_params = sum(p.numel() for p in model.parameters())
+        logger.info(f"Trainable parameters: {trainable_params:,} ({trainable_params/total_params:.2%} of total)")
 
     ###############
     # Training loop
@@ -221,7 +201,7 @@ def train_function(model_args: ModelConfig, script_args: ScriptArguments, traini
     ##################################
     
     logger.info('*** Save model ***')
-    if trainer.is_fsdp_enabled and peft_config:
+    if trainer.is_fsdp_enabled:
         trainer.accelerator.state.fsdp_plugin.set_state_dict_type('FULL_STATE_DICT')
     # Restore k,v cache for fast inference
     trainer.model.config.use_cache = True
@@ -234,7 +214,7 @@ def train_function(model_args: ModelConfig, script_args: ScriptArguments, traini
 
     # Save everything else on main process
     if trainer.accelerator.is_main_process:
-        trainer.create_model_card({'tags': ['sft', 'tutorial', 'philschmid']})
+        trainer.create_model_card({'tags': ['sft', 'full-finetuning']})
     # push to hub if needed
     if training_args.push_to_hub is True:
         logger.info('Pushing to hub...')

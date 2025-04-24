@@ -1,0 +1,67 @@
+2025-04-23 15:56:50 | INFO     | Loaded model with vLLM backend, tensor_parallel_size=2
+2025-04-23 15:56:50 | INFO     | Model loaded in 75.41s
+2025-04-23 15:56:50 | INFO     | Loaded 400 examples from /share/u/harshraj/CotIF/data/cotroller_dataset-mix-wo_translation-v5-test-small.json
+2025-04-23 16:01:06 | INFO     | Generated 11 responses in 255.85s (0.04 examples/s)
+2025-04-23 16:05:50 | INFO     | Generated 11 responses in 283.40s (0.04 examples/s)
+2025-04-23 16:10:40 | INFO     | Generated 11 responses in 290.52s (0.04 examples/s)
+2025-04-23 16:15:24 | INFO     | Generated 11 responses in 283.53s (0.04 examples/s)
+2025-04-23 16:20:00 | INFO     | Generated 12 responses in 276.37s (0.04 examples/s)
+2025-04-23 16:20:00 | INFO     | Saved intermediate results after batch 5/34
+2025-04-23 16:24:35 | INFO     | Generated 11 responses in 275.39s (0.04 examples/s)
+2025-04-23 16:29:42 | INFO     | Generated 12 responses in 307.03s (0.04 examples/s)
+2025-04-23 16:34:40 | INFO     | Generated 11 responses in 297.96s (0.04 examples/s)
+2025-04-23 16:39:28 | INFO     | Generated 11 responses in 287.26s (0.04 examples/s)
+2025-04-23 16:44:07 | INFO     | Generated 10 responses in 279.71s (0.04 examples/s)
+2025-04-23 16:44:08 | INFO     | Saved intermediate results after batch 10/34
+2025-04-23 16:48:35 | INFO     | Generated 10 responses in 267.92s (0.04 examples/s)
+2025-04-23 16:53:52 | INFO     | Generated 11 responses in 316.70s (0.03 examples/s)
+2025-04-23 16:59:23 | INFO     | Generated 11 responses in 330.61s (0.03 examples/s)
+2025-04-23 17:03:25 | INFO     | Generated 10 responses in 241.88s (0.04 examples/s)
+2025-04-23 17:08:16 | INFO     | Generated 11 responses in 291.52s (0.04 examples/s)
+2025-04-23 17:08:16 | INFO     | Saved intermediate results after batch 15/34
+2025-04-23 17:12:57 | INFO     | Generated 11 responses in 280.73s (0.04 examples/s)
+2025-04-23 17:18:11 | INFO     | Generated 12 responses in 313.80s (0.04 examples/s)
+2025-04-23 17:22:57 | INFO     | Generated 11 responses in 285.88s (0.04 examples/s)
+2025-04-23 17:27:38 | INFO     | Generated 10 responses in 281.73s (0.04 examples/s)
+2025-04-23 17:32:34 | INFO     | Generated 11 responses in 295.19s (0.04 examples/s)
+2025-04-23 17:32:34 | INFO     | Saved intermediate results after batch 20/34
+2025-04-23 17:37:29 | INFO     | Generated 11 responses in 294.79s (0.04 examples/s)
+2025-04-23 17:42:00 | INFO     | Generated 10 responses in 271.40s (0.04 examples/s)
+2025-04-23 17:46:19 | INFO     | Generated 9 responses in 259.04s (0.03 examples/s)
+2025-04-23 17:51:12 | INFO     | Generated 10 responses in 292.70s (0.03 examples/s)
+2025-04-23 17:56:06 | INFO     | Generated 12 responses in 293.91s (0.04 examples/s)
+2025-04-23 17:56:06 | INFO     | Saved intermediate results after batch 25/34
+2025-04-23 18:00:48 | INFO     | Generated 11 responses in 282.22s (0.04 examples/s)
+2025-04-23 18:05:36 | INFO     | Generated 12 responses in 288.33s (0.04 examples/s)
+2025-04-23 18:10:47 | INFO     | Generated 10 responses in 310.77s (0.03 examples/s)
+2025-04-23 18:14:52 | INFO     | Generated 10 responses in 244.67s (0.04 examples/s)
+2025-04-23 18:21:18 | INFO     | Generated 11 responses in 385.67s (0.03 examples/s)
+2025-04-23 18:21:18 | INFO     | Saved intermediate results after batch 30/34
+2025-04-23 18:26:00 | INFO     | Generated 11 responses in 282.63s (0.04 examples/s)
+2025-04-23 18:31:29 | INFO     | Generated 12 responses in 329.08s (0.04 examples/s)
+2025-04-23 18:36:31 | INFO     | Generated 10 responses in 301.43s (0.03 examples/s)
+2025-04-23 18:40:16 | INFO     | Generated 3 responses in 224.85s (0.01 examples/s)
+2025-04-23 18:40:16 | INFO     | Saved intermediate results after batch 34/34
+2025-04-23 18:40:16 | INFO     | 
+Evaluation completed in 9805.56s
+2025-04-23 18:40:16 | INFO     | Overall accuracy: 0.4654
+2025-04-23 18:40:16 | INFO     | 
+Accuracy by function:
+2025-04-23 18:40:16 | INFO     |   highlight_logical_words_forward: 1.0000 (19 examples)
+2025-04-23 18:40:16 | INFO     |   commas_to_semicolons_forward: 0.7619 (21 examples)
+2025-04-23 18:40:16 | INFO     |   replace_and_ampersand_forward: 0.7059 (17 examples)
+2025-04-23 18:40:16 | INFO     |   add_line_numbers_forward: 0.7000 (20 examples)
+2025-04-23 18:40:16 | INFO     |   title_case_forward: 0.6957 (23 examples)
+2025-04-23 18:40:16 | INFO     |   avoid_the_forward: 0.6667 (30 examples)
+2025-04-23 18:40:16 | INFO     |   sentences_per_line_forward: 0.6000 (20 examples)
+2025-04-23 18:40:16 | INFO     |   full_stops_to_exclamation_marks_forward: 0.5500 (20 examples)
+2025-04-23 18:40:16 | INFO     |   one_word_per_line_forward: 0.5000 (22 examples)
+2025-04-23 18:40:16 | INFO     |   indent_paragraphs_forward: 0.4444 (18 examples)
+2025-04-23 18:40:16 | INFO     |   use_multiple_spaces_forward: 0.4286 (21 examples)
+2025-04-23 18:40:16 | INFO     |   lower_case_forward: 0.3333 (18 examples)
+2025-04-23 18:40:16 | INFO     |   render_as_html_forward: 0.2727 (22 examples)
+2025-04-23 18:40:16 | INFO     |   upper_case_forward: 0.2581 (31 examples)
+2025-04-23 18:40:16 | INFO     |   json_of_paragraphs_forward: 0.0000 (24 examples)
+2025-04-23 18:40:16 | INFO     |   insert_sentence_divider_forward: 0.0000 (18 examples)
+2025-04-23 18:40:16 | INFO     |   bracket_sentences_forward: 0.0000 (17 examples)
+2025-04-23 18:40:16 | INFO     | Results saved to /share/u/harshraj/CotIF/data/cotroller_dataset-mix-wo_translation-v5-test-small-cotroller_DeepSeek-R1-Distill-Llama-8B_MERGED-results.json

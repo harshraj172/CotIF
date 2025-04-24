@@ -6,44 +6,55 @@ torch_dtype: bfloat16
 use_liger_kernel: true
 bf16: true
 tf32: true
-output_dir: runs/cotroller_DeepSeek-R1-Distill-Llama-8B
+output_dir: /share/u/harshraj/CotIF/models/R1-Distill-Llama-8B-FULLFT-v5
 
 # Dataset arguments
-dataset_id_or_path: /share/u/harshraj/CotIF/data/forward/cotroller_train_dataset.json
+dataset_id_or_path: /share/u/harshraj/CotIF/data-v2/cotroller_dataset-mix-wo_translation-v5.json
 max_seq_length: 4096
 packing: true
 
-# LoRA arguments
-use_peft: true
-load_in_4bit: true
-lora_target_modules: "all-linear"
-# important as we need to train the special tokens for the chat template of llama 
-# lora_modules_to_save: ["lm_head", "model.embed_tokens"] # you might need to change this for qwen or other models
-lora_r: 16
-lora_alpha: 16
-
 # Training arguments
-# num_samples: 100
+# num_samples: 100 # Uncomment to use a subset of data for testing
 num_train_epochs: 2
-# max_steps: 10
-per_device_train_batch_size: 8 #############
-gradient_accumulation_steps: 2
+# max_steps: 10 # Uncomment to limit the number of steps 
+per_device_train_batch_size: 1  # Reduced batch size for full fine-tuning
+gradient_accumulation_steps: 1  # Increased for similar effective batch size
 gradient_checkpointing: true
 gradient_checkpointing_kwargs:
   use_reentrant: false
-learning_rate: 5.0e-6 # Smaller than before 
-lr_scheduler_type: constant
-warmup_ratio: 0.03
+learning_rate: 2.0e-5  # Higher learning rate for full fine-tuning
+weight_decay: 0.01     # Added weight decay for regularization
+lr_scheduler_type: cosine  # Changed to cosine for better convergence
+warmup_ratio: 0.05     # Slightly increased warmup
+
+# Optimizer settings
+optim: adamw_torch
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_epsilon: 1.0e-8
+
+# DeepSpeed configuration (optional - uncomment if using DeepSpeed)
+# deepspeed:
+#   zero_stage: 3
+#   offload_optimizer:
+#     device: cpu
+#     pin_memory: true
+#   offload_param:
+#     device: cpu
+#     pin_memory: true
+#   zero3_init_flag: true
+#   zero3_save_16bit_model: true
 
 # Logging arguments
 logging_strategy: steps
 logging_steps: 5
+save_strategy: "epoch"
+save_total_limit: 3  # Keep only the last 3 checkpoints to save disk space
 report_to:
 - tensorboard
-save_strategy: "epoch"
 seed: 42
 
 # Hugging Face Hub 
 push_to_hub: false
-# hub_model_id: llama-3-1-8b-math-orca-qlora-10k-ep1 # if not defined same as output_dir
+# hub_model_id: deepseek-r1-8b-full-ft  # if not defined same as output_dir
 hub_strategy: every_save
