@@ -1,0 +1,394 @@
+[
+  {
+    "config": {
+      "tensor_parallel_size": 4,
+      "batch_size": 128,
+      "prompt_length": 512,
+      "output_length": 512,
+      "block_size": 16,
+      "gpu_memory_utilization": 0.9,
+      "num_iterations": 3,
+      "swap_space": 4,
+      "enforce_eager": false
+    },
+    "success": true,
+    "error": null,
+    "avg_latency_seconds": 10.675697088241577,
+    "avg_tokens_per_second": 11019.680454672212,
+    "throughput_per_gpu": 2754.920113668053,
+    "p50_latency_seconds": 10.638965368270874,
+    "p90_latency_seconds": 10.747286748886108,
+    "memory_usage_gb": {
+      "gpu_0": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_1": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_2": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_3": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      }
+    },
+    "estimated_time_for_50k": 1.8905569375653037,
+    "timestamp": "2025-04-29 13:08:46",
+    "hostname": "c002"
+  },
+  {
+    "config": {
+      "tensor_parallel_size": 4,
+      "batch_size": 128,
+      "prompt_length": 512,
+      "output_length": 512,
+      "block_size": 16,
+      "gpu_memory_utilization": 0.95,
+      "num_iterations": 3,
+      "swap_space": 4,
+      "enforce_eager": false
+    },
+    "success": true,
+    "error": null,
+    "avg_latency_seconds": 10.610282897949219,
+    "avg_tokens_per_second": 11057.775179430238,
+    "throughput_per_gpu": 2764.4437948575596,
+    "p50_latency_seconds": 10.59224271774292,
+    "p90_latency_seconds": 10.639758968353272,
+    "memory_usage_gb": {
+      "gpu_0": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_1": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_2": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_3": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      }
+    },
+    "estimated_time_for_50k": 1.8840438510712052,
+    "timestamp": "2025-04-29 13:08:46",
+    "hostname": "c002"
+  },
+  {
+    "config": {
+      "tensor_parallel_size": 4,
+      "batch_size": 128,
+      "prompt_length": 512,
+      "output_length": 512,
+      "block_size": 32,
+      "gpu_memory_utilization": 0.9,
+      "num_iterations": 3,
+      "swap_space": 4,
+      "enforce_eager": false
+    },
+    "success": true,
+    "error": null,
+    "avg_latency_seconds": 10.9236687819163,
+    "avg_tokens_per_second": 10792.218199583092,
+    "throughput_per_gpu": 2698.054549895773,
+    "p50_latency_seconds": 10.945503950119019,
+    "p90_latency_seconds": 10.967336988449096,
+    "memory_usage_gb": {
+      "gpu_0": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_1": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_2": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_3": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      }
+    },
+    "estimated_time_for_50k": 1.9304032728080063,
+    "timestamp": "2025-04-29 13:08:46",
+    "hostname": "c002"
+  },
+  {
+    "config": {
+      "tensor_parallel_size": 4,
+      "batch_size": 128,
+      "prompt_length": 512,
+      "output_length": 512,
+      "block_size": 32,
+      "gpu_memory_utilization": 0.95,
+      "num_iterations": 3,
+      "swap_space": 4,
+      "enforce_eager": false
+    },
+    "success": true,
+    "error": null,
+    "avg_latency_seconds": 10.536537885665894,
+    "avg_tokens_per_second": 11157.101319373733,
+    "throughput_per_gpu": 2789.275329843433,
+    "p50_latency_seconds": 10.549408674240112,
+    "p90_latency_seconds": 10.597874975204467,
+    "memory_usage_gb": {
+      "gpu_0": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_1": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_2": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_3": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      }
+    },
+    "estimated_time_for_50k": 1.8672711430125064,
+    "timestamp": "2025-04-29 13:08:46",
+    "hostname": "c002"
+  },
+  {
+    "config": {
+      "tensor_parallel_size": 4,
+      "batch_size": 96,
+      "prompt_length": 512,
+      "output_length": 512,
+      "block_size": 16,
+      "gpu_memory_utilization": 0.9,
+      "num_iterations": 3,
+      "swap_space": 4,
+      "enforce_eager": false
+    },
+    "success": true,
+    "error": null,
+    "avg_latency_seconds": 9.827384074529013,
+    "avg_tokens_per_second": 8997.923301208953,
+    "throughput_per_gpu": 2249.4808253022384,
+    "p50_latency_seconds": 9.758360862731934,
+    "p90_latency_seconds": 9.93244514465332,
+    "memory_usage_gb": {
+      "gpu_0": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_1": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_2": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_3": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      }
+    },
+    "estimated_time_for_50k": 2.31534906843829,
+    "timestamp": "2025-04-29 13:08:46",
+    "hostname": "c002"
+  },
+  {
+    "config": {
+      "tensor_parallel_size": 4,
+      "batch_size": 96,
+      "prompt_length": 512,
+      "output_length": 512,
+      "block_size": 16,
+      "gpu_memory_utilization": 0.95,
+      "num_iterations": 3,
+      "swap_space": 4,
+      "enforce_eager": false
+    },
+    "success": true,
+    "error": null,
+    "avg_latency_seconds": 9.766635974248251,
+    "avg_tokens_per_second": 9053.337445996227,
+    "throughput_per_gpu": 2263.3343614990567,
+    "p50_latency_seconds": 9.773173332214355,
+    "p90_latency_seconds": 9.834549140930175,
+    "memory_usage_gb": {
+      "gpu_0": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_1": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_2": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_3": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      }
+    },
+    "estimated_time_for_50k": 2.3011771578829996,
+    "timestamp": "2025-04-29 13:08:46",
+    "hostname": "c002"
+  },
+  {
+    "config": {
+      "tensor_parallel_size": 4,
+      "batch_size": 96,
+      "prompt_length": 512,
+      "output_length": 512,
+      "block_size": 32,
+      "gpu_memory_utilization": 0.9,
+      "num_iterations": 3,
+      "swap_space": 4,
+      "enforce_eager": false
+    },
+    "success": true,
+    "error": null,
+    "avg_latency_seconds": 9.734081188837687,
+    "avg_tokens_per_second": 9083.138594657536,
+    "throughput_per_gpu": 2270.784648664384,
+    "p50_latency_seconds": 9.73341965675354,
+    "p90_latency_seconds": 9.737140321731568,
+    "memory_usage_gb": {
+      "gpu_0": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_1": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_2": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_3": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      }
+    },
+    "estimated_time_for_50k": 2.2936271549998097,
+    "timestamp": "2025-04-29 13:08:46",
+    "hostname": "c002"
+  },
+  {
+    "config": {
+      "tensor_parallel_size": 4,
+      "batch_size": 96,
+      "prompt_length": 512,
+      "output_length": 512,
+      "block_size": 32,
+      "gpu_memory_utilization": 0.95,
+      "num_iterations": 3,
+      "swap_space": 4,
+      "enforce_eager": false
+    },
+    "success": true,
+    "error": null,
+    "avg_latency_seconds": 9.747371912002563,
+    "avg_tokens_per_second": 9071.321760736579,
+    "throughput_per_gpu": 2267.8304401841447,
+    "p50_latency_seconds": 9.783352613449097,
+    "p90_latency_seconds": 9.81140341758728,
+    "memory_usage_gb": {
+      "gpu_0": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_1": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_2": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      },
+      "gpu_3": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      }
+    },
+    "estimated_time_for_50k": 2.2966149677885195,
+    "timestamp": "2025-04-29 13:08:46",
+    "hostname": "c002"
+  }
+]
