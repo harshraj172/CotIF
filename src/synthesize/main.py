@@ -5,6 +5,7 @@ import argparse
 from loguru import logger
 from copy import deepcopy
 
+import datasets
 from datasets import load_dataset
 from transformers import AutoTokenizer, MarianMTModel, MarianTokenizer
 
@@ -59,8 +60,10 @@ def get_tokenizer_with_new_chat_template(tokenizer):
 tokenizer = get_tokenizer_with_new_chat_template(AutoTokenizer.from_pretrained(MODEL))
 
 def datapoint_ok(cot, new_cot, length, fct):
-    if fct != identity and cot == new_cot: return False
-    if length > MAX_SEQ_LENGTH_IN_CHARS: return False
+    if fct != identity and cot == new_cot: 
+        logger.info(f"Function {fct.__name__} did not change the CoT.")
+        return False
+    # if length > MAX_SEQ_LENGTH_IN_CHARS: return False
     return True
 
 def format_assistant_response(assistant):
@@ -75,8 +78,12 @@ def format_assistant_response(assistant):
     return assistant
 
 def generate_r1_prompt(datapoint):
-    user = datapoint['conversations'][0][0]['value']
-    assistant = datapoint['conversations'][0][1]['value']
+    if "openmath" in args.dataset_path.lower():
+        user = datapoint['problem'][0]
+        assistant = datapoint['generated_solution'][0]
+    elif 'bespoke' in args.dataset_path.lower():
+        user = datapoint['conversations'][0][0]['value']
+        assistant = datapoint['conversations'][0][1]['value']
     
     # Make sure the CoT is in the R1 format.
     assistant = format_assistant_response(assistant)
@@ -84,17 +91,16 @@ def generate_r1_prompt(datapoint):
     # Extract from the assistant response the part between <think> and </think>.
     cot_and_response = assistant.split('<think>\n')[1]
     try:
-        cot, response = cot_and_response.split('</think>\n\n')
+        cot, response = cot_and_response.split('</think>')
     except:
         print(cot_and_response)
         print("^^^ ERROR")
         sys.exit(0)
 
-    cot = cot.strip()
+    cot, response = cot.strip(), response.strip()
 
     # Shuffle the funcion list.    
     shuffled_functions = deepcopy(forward_functions) + deepcopy(backward_functions)
-    random.shuffle(shuffled_functions)
     
     # Apply the functions to the CoT and construct the list of instructions.
     conversations = []
@@ -102,11 +108,20 @@ def generate_r1_prompt(datapoint):
     num_chars = []
     # Always include the identity function.
     
+    # if args.use_autoif:
+    #     add = [identity] * int(args.percentage_identity*(len(shuffled_functions)+1)) + [autoif.compile]
+    # else:
+    #     add = [identity] * int(args.percentage_identity*len(shuffled_functions))
+    # if args.use_autoif:
+    #     add = [autoif.compile]
+    # else:
+    #     add = []
     if args.use_autoif:
-        add = [identity, autoif.compile]
-    else:
-        add = [identity]
-    for f in add + shuffled_functions:
+        shuffled_functions = shuffled_functions + [autoif.compile]
+    random.shuffle(shuffled_functions)
+    
+    # for f in add + shuffled_functions:
+    for f in [shuffled_functions[0]]:
         if f is translate_forward:
             target_langs = ['fr', 'de', 'es', 'it', 'ru', 'jap', 'zh', 'ar', 'nl', 'sv']
             model_and_tokenizer = {}
@@ -120,13 +135,15 @@ def generate_r1_prompt(datapoint):
         result = f(cot)
         new_cot = result['new_text']
         description = result['description']
-        if not new_cot and not description: continue 
-        if f == identity:
-            new_user = user
-            prefix = "<think>\n"
-        else:
-            new_user = user + f"\n\n## NOTES\n\nInstructions that you must follow in your reasoning chain (the part of your response before your final answer):\n- {description}"
-            prefix = f"<think>\nOkay, so before I start reasoning, let me recall the user's instructions for my reasoning chain: I must {description}.\nIt's really important that I adhere to these instructions in my reasoning chain, since otherwise the user's need would not be met. So from the next paragraph onward, I'll {description}.\n\n"
+        if not new_cot and not description: 
+            logger.info(f"`new_cot` or `description` is None")
+            continue 
+        # if f == identity:
+        #     new_user = user
+        #     prefix = "<think>\n"
+        # else:
+        new_user = user + f"\n\n## NOTES\n\nInstructions that you must follow in your reasoning chain (the part of your response before your final answer):\n- {description}"
+        prefix = f"<think>\nOkay, so before I start reasoning, let me recall the user's instructions for my reasoning chain: I must {description}.\nIt's really important that I adhere to these instructions in my reasoning chain, since otherwise the user's need would not be met. So from the next paragraph onward, I'll {description}.\n\n"
         # assistant = f"{new_cot}\n</think>\n\n{response}"
         # conversation = [
         #         # We use no system message according to DeepSeek specs <https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Llama-8B>.
@@ -146,14 +163,16 @@ def generate_r1_prompt(datapoint):
             applied_functions.append(f.__name__)
             num_chars.append(length)
             # If we have applied enough functions, stop.
-            if len(conversations) == NUM_FUNCTIONS_PER_DATAPOINT:
-                break
+            # if len(conversations) == NUM_FUNCTIONS_PER_DATAPOINT:
+            #     break
+        else:
+            logger.info(f"dropping sample bc of failed `datapoint_ok` check")
     
-    # If we didn't get enough functions applied, skip this datapoint altogether.
-    if len(conversations) < NUM_FUNCTIONS_PER_DATAPOINT:
-        conversations = []
-        applied_functions = []
-        num_chars = []
+    # # If we didn't get enough functions applied, skip this datapoint altogether.
+    # if len(conversations) < NUM_FUNCTIONS_PER_DATAPOINT:
+    #     conversations = []
+    #     applied_functions = []
+    #     num_chars = []
         
     return {
         'messages': conversations,
@@ -181,9 +200,10 @@ def test_functions():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Prepare dataset for r1 prompt training.")
     parser.add_argument("--use-autoif", action="store_true", help="Enable AutoIF (loads a 72B model).")
-    parser.add_argument("--dataset-path", type=str, default="bespokelabs/Bespoke-Stratos-17k", help="HuggingFace dataset path.")
-    parser.add_argument("--num-samples", type=int, default=200, help="Number of samples to use from dataset.")
-    parser.add_argument("--output-path", type=str, default="/share/u/harshraj/CotIF/data-v2/cotroller_dataset-mix-v4.json", help="Path to save the processed dataset JSON.")
+    parser.add_argument("--dataset-path", type=str, default="bespokelabs/Bespoke-Stratos-17k", help="HuggingFace dataset path.") # open-thoughts/OpenThoughts-114k, open-thoughts/OpenThoughts2-1M
+    parser.add_argument("--num-samples", type=int, default=None, help="Number of samples to use from dataset.")
+    parser.add_argument("--split", type=str, default="train", help="Dataset split to use.")
+    parser.add_argument("--output-path", type=str, default="/share/u/harshraj/CotIF/data/cotroller_dataset-mix-v4.json", help="Path to save the processed dataset JSON.")
 
     args = parser.parse_args()
     
@@ -191,20 +211,22 @@ if __name__ == "__main__":
         autoif = AutoIf()
         logger.info("Note: `use_autoif=True` requires a 72B model. This may take time.")
 
-    dataset = load_dataset(args.dataset_path, split="train")
+    dataset = load_dataset(args.dataset_path, split=args.split)
+    dataset = dataset.shuffle(seed=0)
     
     if args.num_samples:
-        dataset = dataset.select(range(args.num_samples))
+        dataset = dataset.select(range(min(args.num_samples, len(dataset))))
+        
+    dataset = dataset.map(generate_r1_prompt, remove_columns=dataset.column_names, batched=True, batch_size=1)
     
-    dataset = dataset.shuffle(seed=0)
-
-    dataset = dataset.map(generate_r1_prompt, remove_columns=dataset.features, batched=True, batch_size=1)
-
+    # Create train/test split
     split = dataset.train_test_split(test_size=0.1, seed=42)
-
     train_dataset = split['train']
     test_dataset = split['test']
     
-    train_dataset.to_json(args.output_path, orient="records")
-    test_dataset.to_json(args.output_path.replace('.json', '')+'-test.json', orient="records")
+    # train_dataset = train_dataset.shuffle(seed=0)
+    
+    # Save datasets
+    train_dataset.to_json(args.output_path)
+    test_dataset.to_json(args.output_path.replace('.json', '') + '-test.json')
     logger.info(f"Saved processed dataset to {args.output_path}")

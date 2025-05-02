@@ -123,13 +123,22 @@ class AutoIf:
         for attempt in range(1, max_retries + 1):
             try:
                 # Call API
-                response = self.client.completions.create(
-                    model=self.llm_model_name,
-                    prompt=prompt,
-                    max_tokens=max_new_tokens,
-                    temperature=temp,
-                    top_p=0.95
-                )
+                if 'instruct' or 'chat' in self.llm_model_name.lower():
+                    response = self.client.chat.completions.create(
+                        model=self.llm_model_name,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=max_new_tokens,
+                        temperature=temp,
+                        top_p=0.95
+                    )
+                else:
+                    response = self.client.completions.create(
+                        model=self.llm_model_name,
+                        prompt=prompt,
+                        max_tokens=max_new_tokens,
+                        temperature=temp,
+                        top_p=0.95
+                    )
                 
                 # Extract generated text
                 generated_text = response.choices[0].text
@@ -762,7 +771,7 @@ Please generate one instruction per line in your response and start each line wi
         # Process prompts in batches
         if show_progress:
             logger.info(f"Generating responses for {len(filtered_generated_instructions)} instructions with k={k}")
-        all_generated_texts = self.batch_call_llm(all_prompts, max_new_tokens=1024, batch_size=batch_size, show_progress=show_progress)
+        all_generated_texts = self.batch_call_llm(all_prompts, max_new_tokens=10000, batch_size=batch_size, show_progress=show_progress)
         
         # Process responses
         idx = 0

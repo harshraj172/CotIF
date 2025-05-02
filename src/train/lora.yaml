@@ -6,11 +6,16 @@ torch_dtype: bfloat16
 use_liger_kernel: true
 bf16: true
 tf32: true
-output_dir: /share/u/harshraj/CotIF/models/cotroller_DeepSeek-R1-Distill-Llama-8B-PEFT-MERGE--mix-wo_translation-v5
+output_dir: /share/u/harshraj/CotIF/models/R1-Distill-Llama-8B-PEFT-cotroller_dataset-openmath_1m_all_cotif-v6
+# output_dir: /share/u/harshraj/CotIF/models/R1-Distill-Llama-8B-PEFT-cotroller_dataset-bespoke_52k_cotif-v6
+# output_dir: /share/u/harshraj/CotIF/models/R1-Distill-Llama-8B-PEFT-cotroller_dataset-open_thoughts_mix_cotif_0.25-v6
 
 # Dataset arguments
-dataset_id_or_path: /share/u/harshraj/CotIF/data-v2/cotroller_dataset-mix-wo_translation-v5.json
-max_seq_length: 4096
+dataset_id_or_path: /share/u/harshraj/CotIF/data/cotroller_dataset-openmath-1m-all_cotif-v6.json
+# dataset_id_or_path: /share/u/harshraj/CotIF/data/cotroller_dataset-bespoke_mix-52k_all_cotif-v6.json
+# dataset_id_or_path: /share/u/harshraj/CotIF/data/cotroller_dataset-bespoke_mix-v6.json
+# dataset_id_or_path: /share/u/harshraj/CotIF/data/cotroller_dataset-open_thoughts_mix_cotif_0.25-v6.json
+max_seq_length: 8000
 packing: true
 
 # Save merged weights option
@@ -29,12 +34,12 @@ lora_alpha: 16
 # num_samples: 100
 num_train_epochs: 2
 # max_steps: 10
-per_device_train_batch_size: 6
+per_device_train_batch_size: 12
 gradient_accumulation_steps: 2
 gradient_checkpointing: true
 gradient_checkpointing_kwargs:
   use_reentrant: false
-learning_rate: 5.0e-6
+learning_rate: 5.0e-5
 lr_scheduler_type: constant
 warmup_ratio: 0.03
 

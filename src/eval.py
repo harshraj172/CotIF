@@ -1,16 +1,24 @@
+## Host via
+# python -m vllm.entrypoints.openai.api_server --model Qwen/Qwen2.5-Coder-32B-Instruct --tensor-parallel-size 2 --host 0.0.0.0 --port 8000
 ## Run via 
 # python eval.py --endpoint_url "http://localhost:8000/v1" --model_name "Qwen/Qwen2.5-1.5B-Instruct" --data_path /share/u/harshraj/CotIF/data/cotroller_dataset-mix-wo_translation-v5-test.json --batch_size 12 --max_new_tokens 15000
+# or for hf
+# python eval.py --inference_backend hf --model_name "Qwen/Qwen2.5-1.5B-Instruct" --data_path /share/u/harshraj/CotIF/data/cotroller_dataset-mix-wo_translation-v5-test.json --batch_size 12 --max_new_tokens 15000
 
 import argparse
 import json
 import re
 from loguru import logger
 from collections import defaultdict
-from typing import Dict, List, Callable, Tuple, Any, Optional
+from typing import Dict, List
 from functools import lru_cache
 import os
 import requests
 import time
+
+import openai 
+
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 import numpy as np
 from tqdm import tqdm
@@ -87,167 +95,23 @@ def load_jsonl(dataset_path: str) -> List[Dict]:
         dataset = [json.loads(line) for line in f]
     return dataset
 
-class APIClient:
-    """A client for interacting with API endpoints for language models."""
-    
-    def __init__(self, endpoint_url, api_key="dummy-key", model_name=None):
-        """
-        Initialize the API client.
-        
-        Args:
-            endpoint_url: URL of the API endpoint
-            api_key: API key for authentication
-            model_name: Name of the model to use
-        """
-        self.endpoint_url = endpoint_url
-        self.api_key = api_key
-        self.model_name = model_name
-        
-        # Detect if we're using OpenAI or vLLM-compatible API
-        self.api_type = "openai" if "openai.com" in endpoint_url else "vllm"
-        
-        # Set up session for reusing connections
-        self.session = requests.Session()
-        self.session.headers.update({
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
-        })
-        
-        logger.info(f"Initialized API client for endpoint: {endpoint_url}")
-        logger.info(f"Using API type: {self.api_type}")
-        logger.info(f"Model name: {model_name}")
-    
-    def generate_completions(self, prompts, max_tokens=1024, temperature=0.0, timeout=60):
-        """
-        Generate completions for multiple prompts.
-        
-        Args:
-            prompts: List of prompt strings
-            max_tokens: Maximum number of tokens to generate
-            temperature: Temperature for sampling
-            timeout: Request timeout in seconds
-            
-        Returns:
-            List of generated texts
-        """
-        results = []
-        
-        # OpenAI-compatible endpoint
-        if self.endpoint_url.endswith("/v1"):
-            url = f"{self.endpoint_url}/completions"
-            
-            batch_results = []
-            for prompt in prompts:
-                try:
-                    payload = {
-                        "model": self.model_name,
-                        "prompt": prompt,
-                        "max_tokens": max_tokens,
-                        "temperature": temperature
-                    }
-                    
-                    response = self.session.post(url, json=payload, timeout=timeout)
-                    response.raise_for_status()
-                    
-                    response_json = response.json()
-                    generated_text = response_json.get("choices", [{}])[0].get("text", "")
-                    batch_results.append(generated_text)
-                    
-                except Exception as e:
-                    logger.error(f"Error in API call: {str(e)}")
-                    batch_results.append("")  # Empty string on error
-            
-            results.extend(batch_results)
-        
-        # OpenAI Chat API
-        elif "/chat/completions" in self.endpoint_url or self.api_type == "openai":
-            url = self.endpoint_url if "/chat/completions" in self.endpoint_url else f"{self.endpoint_url}/chat/completions"
-            
-            batch_results = []
-            for prompt in prompts:
-                try:
-                    payload = {
-                        "model": self.model_name,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": max_tokens,
-                        "temperature": temperature
-                    }
-                    
-                    response = self.session.post(url, json=payload, timeout=timeout)
-                    response.raise_for_status()
-                    
-                    response_json = response.json()
-                    generated_text = response_json.get("choices", [{}])[0].get("message", {}).get("content", "")
-                    batch_results.append(generated_text)
-                    
-                except Exception as e:
-                    logger.error(f"Error in API call: {str(e)}")
-                    batch_results.append("")  # Empty string on error
-            
-            results.extend(batch_results)
-            
-        # Custom API format - you can extend this for other API types
-        else:
-            logger.error(f"Unsupported API endpoint: {self.endpoint_url}")
-            results = [""] * len(prompts)  # Empty results
-        
-        return results
-
-def format_chat_messages(messages):
-    """
-    Format chat messages into a string prompt.
-    This is a simplified version and might need to be adjusted based on the API's requirements.
-    
-    Args:
-        messages: List of message dictionaries with 'role' and 'content'
-        
-    Returns:
-        Formatted prompt string
-    """
-    formatted_prompt = ""
-    for message in messages:
-        role = message.get("role", "").capitalize()
-        content = message.get("content", "")
-        formatted_prompt += f"{role}: {content}\n\n"
-    
-    return formatted_prompt.strip()
-
-def batch_generate_responses(api_client, batch_messages, max_new_tokens=1024, batch_size=8):
-    """Generate responses in batches for efficiency."""
-    # Prepare prompts from chat templates
-    prompts = []
-    for messages in batch_messages:
-        # Format as string since we don't have a tokenizer for chat templates
-        prompt = format_chat_messages(messages)
-        prompts.append(prompt)
-    
-    # Process in smaller batches to avoid rate limits
-    results = []
-    for i in range(0, len(prompts), batch_size):
-        batch_prompts = prompts[i:i+batch_size]
-        batch_results = api_client.generate_completions(
-            batch_prompts, 
-            max_tokens=max_new_tokens,
-            temperature=0.0
-        )
-        results.extend(batch_results)
-    
-    return results
-
 @lru_cache(maxsize=1000)
 def extract_reasoning(text):
     """Extract reasoning from within <think> tags with caching for efficiency."""
-    match = re.search(r'<think>(.*?)</think>', text, re.DOTALL)
-    if match:
-        reasoning = match.group(1).strip()
-        if "let me recall" in reasoning.lower().split()[:100] or "adhere to these instructions" in reasoning.lower().split()[:100]:
+    # match = re.search(r'<think>(.*?)</think>', text, re.DOTALL)
+    reasoning = text.split("</think>", 1)[0]
+    if reasoning:
+        # reasoning = match.group(1).strip()
+        if "let me recall" in reasoning.lower()[:220] or "adhere to these instructions" in reasoning.lower()[:220]:
             paragraphs = reasoning.split("\n\n")
             if len(paragraphs) > 1:
                 reasoning = "\n\n".join(paragraphs[1:])
-        return reasoning
-    return ""
+        ret = reasoning
+    else:
+        ret = ""
+    return ret
 
-def evaluate_batch(batch_data, api_client, max_new_tokens=1024):
+def evaluate_batch(batch_data, client, max_new_tokens=1024):
     """Process and evaluate a batch of examples."""
     batch_msgs = []
     function_names = []
@@ -267,8 +131,6 @@ def evaluate_batch(batch_data, api_client, max_new_tokens=1024):
                 continue
                 
             conversation = data_point["messages"]
-            if len(conversation) < 2:
-                continue
                 
             gt_text = extract_reasoning(conversation[1]["content"]) if len(conversation) > 1 else ""
             
@@ -285,11 +147,36 @@ def evaluate_batch(batch_data, api_client, max_new_tokens=1024):
     
     # Second pass: generate all responses in one batch
     start_time = time.time()
-    batch_responses = batch_generate_responses(
-        api_client, 
-        batch_msgs, 
-        max_new_tokens=max_new_tokens
-    )
+    if client.type == "vllm":
+        batch_responses = []
+        for msg in batch_msgs:
+            # logger.info(f"Generating response for: {msg}")
+            response = client.chat.completions.create(
+                model=client.model_name,
+                messages=msg,
+                max_tokens=max_new_tokens,
+                temperature=0.0,
+            )
+            batch_responses.append(response.choices[0].message.content)
+    else:
+        batch_tokenized_prompts = client.tokenizer.apply_chat_template(batch_msgs, tokenize=False)
+        encoded_inputs = client.tokenizer(batch_tokenized_prompts, padding=True, truncation=True, return_tensors="pt")
+        input_ids = encoded_inputs.input_ids.to(client.model.device)
+        attention_mask = encoded_inputs.attention_mask.to(client.model.device)
+        
+        outputs = client.model.generate(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            max_new_tokens=max_new_tokens,
+            do_sample=False, 
+            pad_token_id=client.tokenizer.pad_token_id,
+        )
+        
+        batch_responses = [
+            client.tokenizer.decode(output[len(input_ids[i]):], skip_special_tokens=True)
+            for i, output in enumerate(outputs)
+        ]
+        
     generation_time = time.time() - start_time
     logger.info(f"Generated {len(batch_responses)} responses in {generation_time:.2f}s ({len(batch_responses)/generation_time:.2f} examples/s)")
     
@@ -302,7 +189,10 @@ def evaluate_batch(batch_data, api_client, max_new_tokens=1024):
             eval_function = EVAL_FUNCTION_MAP[function_name]
             
             # Evaluate directly
-            score = eval_function(extracted_reasoning, gt_text)
+            if not extracted_reasoning.strip():
+                score = 0
+            else:
+                score = eval_function(extracted_reasoning, gt_text)
             
             # Prepare result entry
             results.append({
@@ -319,7 +209,7 @@ def evaluate_batch(batch_data, api_client, max_new_tokens=1024):
     
     return results
 
-def evaluate_responses(api_client, dataset, batch_size=16, save_interval=50, max_new_tokens=1024):
+def evaluate_responses(client, dataset, batch_size=16, save_interval=50, max_new_tokens=1024):
     """Evaluate responses with batching and periodic saving."""
     results = {
         "overall_accuracy": 0.0,
@@ -331,7 +221,7 @@ def evaluate_responses(api_client, dataset, batch_size=16, save_interval=50, max
     batches = [dataset[i:i+batch_size] for i in range(0, len(dataset), batch_size)]
     
     for batch_idx, batch in enumerate(tqdm(batches, desc="Evaluating batches")):
-        batch_results = evaluate_batch(batch, api_client, max_new_tokens)
+        batch_results = evaluate_batch(batch, client, max_new_tokens)
         # Update results dictionary
         for result in batch_results:
             function_name = result["function_name"]
@@ -342,7 +232,7 @@ def evaluate_responses(api_client, dataset, batch_size=16, save_interval=50, max
         
         # Save intermediate results periodically
         if (batch_idx + 1) % save_interval == 0 or batch_idx == len(batches) - 1:
-            save_path = args.data_path.replace(".json", f"-{args.model_name.replace('/', '-')}-results.json")
+            save_path = args.data_path.replace('data/', 'results/').replace(".json", f"-{args.model_name.replace('/', '-')}-results.json")
             
             # Calculate current metrics
             all_scores = []
@@ -388,12 +278,11 @@ def main():
     """Main entry point function"""
     parser = argparse.ArgumentParser(description="Evaluate model's ability to follow constraints in reasoning chains.")
     
-    parser.add_argument("--endpoint_url", type=str, required=True,
+    parser.add_argument("--endpoint_url", type=str,
                         help="URL of the API endpoint (e.g., 'http://localhost:8000/v1')")
+    parser.add_argument("--inference_backend", type=str, default="hf")
     parser.add_argument("--model_name", type=str, required=True,
                         help="Name of the model to use with the API")
-    parser.add_argument("--api_key", type=str, default="dummy-key",
-                        help="API key for authentication (default: 'dummy-key')")
     parser.add_argument("--data_path", type=str, required=True,
                         help="Path to the dataset JSON file")
     parser.add_argument("--batch_size", type=int, default=8,
@@ -405,36 +294,23 @@ def main():
     
     global args
     args = parser.parse_args()
-    
-    # Configure detailed logging
-    logger.remove()
-    logger.add(
-        lambda msg: tqdm.write(msg, end=""),
-        colorize=True,
-        level="INFO",
-        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>"
-    )
-    logger.add(
-        args.data_path.replace(".json", f"-{args.model_name.replace('/', '-')}-log.txt"),
-        level="INFO",
-        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}"
-    )
 
-    # Initialize API client
-    api_client = APIClient(
-        endpoint_url=args.endpoint_url,
-        api_key=args.api_key,
-        model_name=args.model_name
-    )
-    
+    client = type('Client', (), {})()
+    if args.inference_backend == "hf":
+        client.tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+        client.model = AutoModelForCausalLM.from_pretrained(args.model_name, device_map="auto")
+    else:
+        client = openai.Client(base_url=args.endpoint_url, api_key="sk-hfkj")
+    client.type = args.inference_backend
+    client.model_name = args.model_name
     # Load dataset
     dataset = load_jsonl(args.data_path)
-    logger.info(f"Loaded {len(dataset)} examples from {args.data_path}")
+    logger.info(f"Loaded dataset with {len(dataset)} samples")
     
     # Run evaluation
     total_start_time = time.time()
     results = evaluate_responses(
-        api_client, 
+        client, 
         dataset, 
         batch_size=args.batch_size,
         save_interval=args.save_interval,

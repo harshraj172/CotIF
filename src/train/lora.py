@@ -93,7 +93,7 @@ def save_merged_model(trainer, output_dir):
     logger.info(f"Merged model saved to {merged_dir}")
     
     # Also save the tokenizer with the merged model
-    trainer._tokenizer.save_pretrained(merged_dir)
+    trainer.tokenizer.save_pretrained(merged_dir)
     logger.info(f"Tokenizer saved to {merged_dir}")
     
     return merged_dir
@@ -266,7 +266,12 @@ def train_function(model_args: ModelConfig, script_args: ScriptArguments, traini
 def main():
     parser = TrlParser((ModelConfig, ScriptArguments, SFTConfig))
     model_args, script_args, training_args = parser.parse_args_and_config()
-
+    # logger.info(f"Script arguments: {script_args}")
+    # logger.info(f"Model arguments: {model_args}")
+    # logger.info(f"Training arguments: {training_args}")
+    # with open(script_args.output_dir + "/script_args.json", "w") as f:
+    #     f.write(script_args.to_json_string())
+        
     # Set seed for reproducibility
     set_seed(training_args.seed)
 
