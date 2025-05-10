@@ -6,12 +6,12 @@ torch_dtype: bfloat16
 use_liger_kernel: true
 bf16: true
 tf32: true
-output_dir: /share/u/harshraj/CotIF/models/R1-Distill-Llama-8B-PEFT-cotroller_dataset-openmath_1m_all_cotif-v6
+output_dir: /disk/u/harshraj/CotIF/models/R1-Distill-Llama-8B-PEFT-cotroller_dataset-openmath_1m_all_cotif-v6
 # output_dir: /share/u/harshraj/CotIF/models/R1-Distill-Llama-8B-PEFT-cotroller_dataset-bespoke_52k_cotif-v6
 # output_dir: /share/u/harshraj/CotIF/models/R1-Distill-Llama-8B-PEFT-cotroller_dataset-open_thoughts_mix_cotif_0.25-v6
 
 # Dataset arguments
-dataset_id_or_path: /share/u/harshraj/CotIF/data/cotroller_dataset-openmath-1m-all_cotif-v6.json
+dataset_id_or_path: /disk/u/harshraj/CotIF/data/cotroller_dataset-openmath-1m-all_cotif-v6.json
 # dataset_id_or_path: /share/u/harshraj/CotIF/data/cotroller_dataset-bespoke_mix-52k_all_cotif-v6.json
 # dataset_id_or_path: /share/u/harshraj/CotIF/data/cotroller_dataset-bespoke_mix-v6.json
 # dataset_id_or_path: /share/u/harshraj/CotIF/data/cotroller_dataset-open_thoughts_mix_cotif_0.25-v6.json
@@ -23,7 +23,7 @@ save_merged_weights: true  # Set to true to save the merged weights
 
 # LoRA arguments
 use_peft: true
-load_in_4bit: true
+# load_in_4bit: true
 lora_target_modules: "all-linear"
 # important as we need to train the special tokens for the chat template of llama 
 lora_modules_to_save: ["lm_head", "model.embed_tokens"] # you might need to change this for qwen or other models

@@ -1,7 +1,7 @@
 ## Host via
 # python -m vllm.entrypoints.openai.api_server --model Qwen/Qwen2.5-Coder-32B-Instruct --tensor-parallel-size 2 --host 0.0.0.0 --port 8000
 ## Run via 
-# python eval.py --endpoint_url "http://localhost:8000/v1" --model_name "Qwen/Qwen2.5-1.5B-Instruct" --data_path /share/u/harshraj/CotIF/data/cotroller_dataset-mix-wo_translation-v5-test.json --batch_size 12 --max_new_tokens 15000
+# python eval.py --endpoint_url "http://localhost:8000/v1" --inference_backend vllm --model_name "Qwen/Qwen2.5-1.5B-Instruct" --data_path /share/u/harshraj/CotIF/data/cotroller_dataset-mix-wo_translation-v5-test.json --batch_size 12 --max_new_tokens 15000
 # or for hf
 # python eval.py --inference_backend hf --model_name "Qwen/Qwen2.5-1.5B-Instruct" --data_path /share/u/harshraj/CotIF/data/cotroller_dataset-mix-wo_translation-v5-test.json --batch_size 12 --max_new_tokens 15000
 
@@ -111,11 +111,20 @@ def extract_reasoning(text):
         ret = ""
     return ret
 
+def eval_correctness(response, gt_response):
+    answer = response.rsplit("boxed{", 1)[-1].split("}", 1)[0]
+    gt_answer = gt_response.rsplit("boxed{", 1)[-1].split("}", 1)[0]
+    if answer.lower() == gt_answer.lower():
+        return 1.0
+    else:
+        return 0.0
+
 def evaluate_batch(batch_data, client, max_new_tokens=1024):
     """Process and evaluate a batch of examples."""
     batch_msgs = []
     function_names = []
-    gt_texts = []
+    gt_responses = []
+    gt_reasonings = []
     data_points = []
     
     # First pass: prepare all inputs
@@ -132,14 +141,15 @@ def evaluate_batch(batch_data, client, max_new_tokens=1024):
                 
             conversation = data_point["messages"]
                 
-            gt_text = extract_reasoning(conversation[1]["content"]) if len(conversation) > 1 else ""
+            gt_reasoning = extract_reasoning(conversation[1]["content"]) if len(conversation) > 1 else ""
             
-            if not gt_text:
+            if not gt_reasoning:
                 continue
                 
             batch_msgs.append([{"role": "user", "content": conversation[0]["content"]}])
             function_names.append(function_name)
-            gt_texts.append(gt_text)
+            gt_responses.append(conversation[1]["content"])
+            gt_reasonings.append(gt_reasoning)
             data_points.append(data_point)
     
     if not batch_msgs:
@@ -183,16 +193,22 @@ def evaluate_batch(batch_data, client, max_new_tokens=1024):
     # Third pass: evaluate all responses sequentially
     results = []
     
-    for i, (response, function_name, gt_text) in enumerate(zip(batch_responses, function_names, gt_texts)):
+    for i, (response, function_name, gt_response, gt_reasoning) in enumerate(zip(batch_responses, function_names, gt_responses, gt_reasonings)):
         try:
             extracted_reasoning = extract_reasoning(response)
             eval_function = EVAL_FUNCTION_MAP[function_name]
             
-            # Evaluate directly
+            # Evaluate directly (for instruction following)
+            if not extracted_reasoning.strip():
+                if_score = 0
+            else:
+                if_score = eval_function(extracted_reasoning, gt_reasoning)
+                
+            # Evaluate directly (for answer correctness)
             if not extracted_reasoning.strip():
                 score = 0
             else:
-                score = eval_function(extracted_reasoning, gt_text)
+                score = eval_correctness(response, gt_response)
             
             # Prepare result entry
             results.append({
@@ -200,8 +216,10 @@ def evaluate_batch(batch_data, client, max_new_tokens=1024):
                 "function_name": function_name,
                 "model_response": response,
                 "model_reasoning": extracted_reasoning,
-                "ground_truth": gt_texts[i],
-                "score": score
+                "ground_truth-reasoning": gt_reasonings[i],
+                "ground_truth-response": gt_responses[i],
+                "if_score": if_score,
+                "score": score,
             })
             
         except Exception as e:
@@ -213,7 +231,9 @@ def evaluate_responses(client, dataset, batch_size=16, save_interval=50, max_new
     """Evaluate responses with batching and periodic saving."""
     results = {
         "overall_accuracy": 0.0,
+        "overall_if_accuracy": 0.0,
         "function_accuracies": defaultdict(list),
+        "correctness_accuracies": defaultdict(list),
         "examples": []
     }
     
@@ -225,9 +245,11 @@ def evaluate_responses(client, dataset, batch_size=16, save_interval=50, max_new
         # Update results dictionary
         for result in batch_results:
             function_name = result["function_name"]
+            if_score = result["if_score"]
             score = result["score"]
             
-            results["function_accuracies"][function_name].append(score)
+            results["function_accuracies"][function_name].append(if_score)
+            results["correctness_accuracies"][function_name].append(score)
             results["examples"].append(result)
         
         # Save intermediate results periodically
@@ -235,16 +257,21 @@ def evaluate_responses(client, dataset, batch_size=16, save_interval=50, max_new
             save_path = args.data_path.replace('data/', 'results/').replace(".json", f"-{args.model_name.replace('/', '-')}-results.json")
             
             # Calculate current metrics
-            all_scores = []
-            for scores in results["function_accuracies"].values():
+            all_scores, all_if_scores = [], []
+            for if_scores in results["function_accuracies"].values():
+                all_if_scores.extend(if_scores)
+            for scores in results["correctness_accuracies"].values():
                 all_scores.extend(scores)
             
             current_results = results.copy()
             current_results["overall_accuracy"] = np.mean(all_scores) if all_scores else 0.0
+            current_results["overall_if_accuracy"] = np.mean(all_if_scores) if all_if_scores else 0.0
             
             function_accuracies_dict = {}
-            for function_name, scores in results["function_accuracies"].items():
+            for function_name, if_scores in results["function_accuracies"].items():
+                scores = results["correctness_accuracies"][function_name]
                 function_accuracies_dict[function_name] = {
+                    "if_accuracy": float(np.mean(if_scores)) if scores else 0.0,
                     "accuracy": float(np.mean(scores)) if scores else 0.0,
                     "count": len(scores)
                 }
@@ -257,17 +284,22 @@ def evaluate_responses(client, dataset, batch_size=16, save_interval=50, max_new
             logger.info(f"Saved intermediate results after batch {batch_idx+1}/{len(batches)}")
     
     # Calculate final metrics
-    all_scores = []
-    for scores in results["function_accuracies"].values():
+    all_scores, all_if_scores = [], []
+    for if_scores in results["function_accuracies"].values():
+        scores = results["correctness_accuracies"][function_name]
         all_scores.extend(scores)
+        all_if_scores.extend(if_scores)
     
     results["overall_accuracy"] = float(np.mean(all_scores)) if all_scores else 0.0
+    results["overall_if_accuracy"] = float(np.mean(all_if_scores)) if all_if_scores else 0.0
     
     # Convert defaultdict to regular dict for JSON serialization
     function_accuracies_dict = {}
-    for function_name, scores in results["function_accuracies"].items():
+    for function_name, if_scores in results["function_accuracies"].items():
+        scores = results["correctness_accuracies"][function_name]
         function_accuracies_dict[function_name] = {
             "accuracy": float(np.mean(scores)) if scores else 0.0,
+            "if_accuracy": float(np.mean(if_scores)) if if_scores else 0.0,
             "count": len(scores)
         }
     results["function_accuracies"] = function_accuracies_dict

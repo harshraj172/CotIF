@@ -6,7 +6,7 @@ from loguru import logger
 from copy import deepcopy
 
 import datasets
-from datasets import load_dataset
+from datasets import load_dataset, concatenate_datasets
 from transformers import AutoTokenizer, MarianMTModel, MarianTokenizer
 
 from constraints import * 
@@ -33,16 +33,48 @@ forward_functions = [
     indent_paragraphs_forward,
     insert_sentence_divider_forward,
     render_as_html_forward,
-    # translate_forward,
-    ]
-
-backward_functions = [
     upper_case_backward,
     title_case_backward,
     palindromes_backward,
     hypernyms_backward,
     paragraph_count_backward
+    # translate_forward,
     ]
+
+# backward_functions = [
+#     upper_case_backward,
+#     title_case_backward,
+#     palindromes_backward,
+#     hypernyms_backward,
+#     paragraph_count_backward
+#     ]
+
+train_functions = [
+    "upper_case_forward",
+    "title_case_forward",
+    "replace_and_ampersand_forward",
+    "avoid_the_forward",
+    "one_word_per_line_forward",
+    "use_multiple_spaces_forward",
+    "sentences_per_line_forward",
+    "commas_to_semicolons_forward",
+    "add_line_numbers_forward",
+    "json_of_paragraphs_forward",
+    "indent_paragraphs_forward",
+    "insert_sentence_divider_forward",
+    "render_as_html_forward",
+    "upper_case_backward",
+    "title_case_backward",
+    "palindromes_backward",
+    "hypernyms_backward"
+]
+eval_functions = [
+    "bracket_sentences_forward",
+    "highlight_logical_words_forward",
+    "lower_case_forward",
+    "full_stops_to_exclamation_marks_forward",
+    "paragraph_count_backward"
+]
 
 # -1 because we also include the identity function.
 assert len(forward_functions) >= NUM_FUNCTIONS_PER_DATAPOINT - 1
@@ -78,10 +110,10 @@ def format_assistant_response(assistant):
     return assistant
 
 def generate_r1_prompt(datapoint):
-    if "openmath" in args.dataset_path.lower():
+    if "conversations" not in datapoint:
         user = datapoint['problem'][0]
         assistant = datapoint['generated_solution'][0]
-    elif 'bespoke' in args.dataset_path.lower():
+    else:
         user = datapoint['conversations'][0][0]['value']
         assistant = datapoint['conversations'][0][1]['value']
     
@@ -89,13 +121,17 @@ def generate_r1_prompt(datapoint):
     assistant = format_assistant_response(assistant)
 
     # Extract from the assistant response the part between <think> and </think>.
-    cot_and_response = assistant.split('<think>\n')[1]
     try:
+        cot_and_response = assistant.split('<think>')[1]
         cot, response = cot_and_response.split('</think>')
     except:
-        print(cot_and_response)
-        print("^^^ ERROR")
-        sys.exit(0)
+        # drop
+        return {
+            'messages': [],
+            'applied_functions': [],
+            'num_chars': []
+        }
+        # sys.exit(0)
 
     cot, response = cot.strip(), response.strip()
 
@@ -162,11 +198,12 @@ def generate_r1_prompt(datapoint):
             conversations.append(conversation)
             applied_functions.append(f.__name__)
             num_chars.append(length)
+            logger.info(f"`datapoint_ok` ✅")
             # If we have applied enough functions, stop.
             # if len(conversations) == NUM_FUNCTIONS_PER_DATAPOINT:
             #     break
         else:
-            logger.info(f"dropping sample bc of failed `datapoint_ok` check")
+            logger.info(f"`datapoint_ok` ❌")
     
     # # If we didn't get enough functions applied, skip this datapoint altogether.
     # if len(conversations) < NUM_FUNCTIONS_PER_DATAPOINT:
@@ -200,7 +237,7 @@ def test_functions():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Prepare dataset for r1 prompt training.")
     parser.add_argument("--use-autoif", action="store_true", help="Enable AutoIF (loads a 72B model).")
-    parser.add_argument("--dataset-path", type=str, default="bespokelabs/Bespoke-Stratos-17k", help="HuggingFace dataset path.") # open-thoughts/OpenThoughts-114k, open-thoughts/OpenThoughts2-1M
+    parser.add_argument("--dataset-paths", type=str, nargs="+", default=["bespokelabs/Bespoke-Stratos-17k"], help="One or more HuggingFace dataset paths (space-separated).") # open-thoughts/OpenThoughts-114k, open-thoughts/OpenThoughts2-1M
     parser.add_argument("--num-samples", type=int, default=None, help="Number of samples to use from dataset.")
     parser.add_argument("--split", type=str, default="train", help="Dataset split to use.")
     parser.add_argument("--output-path", type=str, default="/share/u/harshraj/CotIF/data/cotroller_dataset-mix-v4.json", help="Path to save the processed dataset JSON.")
@@ -211,7 +248,11 @@ if __name__ == "__main__":
         autoif = AutoIf()
         logger.info("Note: `use_autoif=True` requires a 72B model. This may take time.")
 
-    dataset = load_dataset(args.dataset_path, split=args.split)
+    all_datasets = []
+    for dataset_path in args.dataset_paths:
+        dataset = load_dataset(dataset_path, split=args.split)
+        all_datasets.append(dataset)
+    dataset = concatenate_datasets(all_datasets)
     dataset = dataset.shuffle(seed=0)
     
     if args.num_samples:
@@ -220,9 +261,13 @@ if __name__ == "__main__":
     dataset = dataset.map(generate_r1_prompt, remove_columns=dataset.column_names, batched=True, batch_size=1)
     
     # Create train/test split
-    split = dataset.train_test_split(test_size=0.1, seed=42)
-    train_dataset = split['train']
-    test_dataset = split['test']
+    # split = dataset.train_test_split(test_size=0.1, seed=42)
+    # train_dataset = split['train']
+    # test_dataset = split['test']
+    
+    # OOD Test
+    train_dataset = dataset.filter(lambda x: x['applied_functions'] in train_functions)
+    test_dataset = dataset.filter(lambda x: x['applied_functions'] in eval_functions)
     
     # train_dataset = train_dataset.shuffle(seed=0)
     
