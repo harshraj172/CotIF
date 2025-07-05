@@ -1,0 +1,226 @@
+[
+  {
+    "config": {
+      "tensor_parallel_size": 1,
+      "batch_size": 1,
+      "prompt_length": 512,
+      "output_length": 512,
+      "block_size": 16,
+      "gpu_memory_utilization": 0.8,
+      "num_iterations": 3,
+      "swap_space": 4,
+      "enforce_eager": false
+    },
+    "success": true,
+    "error": null,
+    "avg_latency_seconds": 232.44333004951477,
+    "avg_tokens_per_second": 3.9665582146961094,
+    "throughput_per_gpu": 3.9665582146961094,
+    "p90_latency_seconds": 232.44683089256287,
+    "memory_usage_gb": {
+      "gpu_0": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      }
+    },
+    "estimated_time_for_50k": 5252.244441073819
+  },
+  {
+    "config": {
+      "tensor_parallel_size": 1,
+      "batch_size": 4,
+      "prompt_length": 512,
+      "output_length": 512,
+      "block_size": 16,
+      "gpu_memory_utilization": 0.8,
+      "num_iterations": 3,
+      "swap_space": 4,
+      "enforce_eager": false
+    },
+    "success": true,
+    "error": null,
+    "avg_latency_seconds": 232.38181606928507,
+    "avg_tokens_per_second": 15.870432831849534,
+    "throughput_per_gpu": 15.870432831849534,
+    "p90_latency_seconds": 232.38885946273803,
+    "memory_usage_gb": {
+      "gpu_0": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      }
+    },
+    "estimated_time_for_50k": 1312.7136199791612
+  },
+  {
+    "config": {
+      "tensor_parallel_size": 1,
+      "batch_size": 8,
+      "prompt_length": 512,
+      "output_length": 512,
+      "block_size": 16,
+      "gpu_memory_utilization": 0.8,
+      "num_iterations": 3,
+      "swap_space": 4,
+      "enforce_eager": false
+    },
+    "success": true,
+    "error": null,
+    "avg_latency_seconds": 233.02359755833945,
+    "avg_tokens_per_second": 31.653446618075737,
+    "throughput_per_gpu": 31.653446618075737,
+    "p90_latency_seconds": 233.0298538684845,
+    "memory_usage_gb": {
+      "gpu_0": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      }
+    },
+    "estimated_time_for_50k": 658.169506300664
+  },
+  {
+    "config": {
+      "tensor_parallel_size": 1,
+      "batch_size": 16,
+      "prompt_length": 512,
+      "output_length": 512,
+      "block_size": 16,
+      "gpu_memory_utilization": 0.8,
+      "num_iterations": 3,
+      "swap_space": 4,
+      "enforce_eager": false
+    },
+    "success": true,
+    "error": null,
+    "avg_latency_seconds": 234.0535362561544,
+    "avg_tokens_per_second": 59.87519042179114,
+    "throughput_per_gpu": 59.87519042179114,
+    "p90_latency_seconds": 234.06790890693665,
+    "memory_usage_gb": {
+      "gpu_0": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      }
+    },
+    "estimated_time_for_50k": 347.9460054585679
+  },
+  {
+    "config": {
+      "tensor_parallel_size": 1,
+      "batch_size": 1,
+      "prompt_length": 512,
+      "output_length": 512,
+      "block_size": 16,
+      "gpu_memory_utilization": 0.9,
+      "num_iterations": 3,
+      "swap_space": 4,
+      "enforce_eager": false
+    },
+    "success": true,
+    "error": null,
+    "avg_latency_seconds": 232.4784128665924,
+    "avg_tokens_per_second": 3.965959630318874,
+    "throughput_per_gpu": 3.965959630318874,
+    "p90_latency_seconds": 232.4826702594757,
+    "memory_usage_gb": {
+      "gpu_0": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      }
+    },
+    "estimated_time_for_50k": 5253.037165095469
+  },
+  {
+    "config": {
+      "tensor_parallel_size": 1,
+      "batch_size": 4,
+      "prompt_length": 512,
+      "output_length": 512,
+      "block_size": 16,
+      "gpu_memory_utilization": 0.9,
+      "num_iterations": 3,
+      "swap_space": 4,
+      "enforce_eager": false
+    },
+    "success": true,
+    "error": null,
+    "avg_latency_seconds": 232.38769602775574,
+    "avg_tokens_per_second": 15.870031273733469,
+    "throughput_per_gpu": 15.870031273733469,
+    "p90_latency_seconds": 232.39384951591492,
+    "memory_usage_gb": {
+      "gpu_0": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      }
+    },
+    "estimated_time_for_50k": 1312.746835465576
+  },
+  {
+    "config": {
+      "tensor_parallel_size": 1,
+      "batch_size": 8,
+      "prompt_length": 512,
+      "output_length": 512,
+      "block_size": 16,
+      "gpu_memory_utilization": 0.9,
+      "num_iterations": 3,
+      "swap_space": 4,
+      "enforce_eager": false
+    },
+    "success": true,
+    "error": null,
+    "avg_latency_seconds": 233.01807244618735,
+    "avg_tokens_per_second": 31.654197135700418,
+    "throughput_per_gpu": 31.654197135700418,
+    "p90_latency_seconds": 233.0211431980133,
+    "memory_usage_gb": {
+      "gpu_0": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      }
+    },
+    "estimated_time_for_50k": 658.1539011721438
+  },
+  {
+    "config": {
+      "tensor_parallel_size": 1,
+      "batch_size": 16,
+      "prompt_length": 512,
+      "output_length": 512,
+      "block_size": 16,
+      "gpu_memory_utilization": 0.9,
+      "num_iterations": 3,
+      "swap_space": 4,
+      "enforce_eager": false
+    },
+    "success": true,
+    "error": null,
+    "avg_latency_seconds": 234.43121282259622,
+    "avg_tokens_per_second": 61.80064435810598,
+    "throughput_per_gpu": 61.80064435810598,
+    "p90_latency_seconds": 234.43752160072327,
+    "memory_usage_gb": {
+      "gpu_0": {
+        "total_gb": 79.25,
+        "used_gb": 0.0,
+        "reserved_gb": 0.0,
+        "utilization_percent": 0.0
+      }
+    },
+    "estimated_time_for_50k": 337.105438781736
+  }
+]

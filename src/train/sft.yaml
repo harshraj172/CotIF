@@ -1,0 +1,73 @@
+# Model arguments
+model_name_or_path: deepseek-ai/DeepSeek-R1-Distill-Llama-8B
+model_revision: main
+torch_dtype: bfloat16
+# attn_implementation: flash_attention_2
+use_liger_kernel: true
+bf16: true
+tf32: true
+# output_dir: /share/u/harshraj/CotIF/models/R1-Distill-Llama-8B-FULLFT-v5
+# output_dir: /disk/u/harshraj/CotIF/models/R1-Distill-Llama-8B-SFT-cotroller_dataset-openmath-1m-all_cotif-v6
+# output_dir: /disk/u/harshraj/CotIF/models/R1-Distill-Llama-8B-SFT-cotroller_dataset-bespoke_52k_cotif-v6-mv2
+# output_dir: /disk/u/harshraj/CotIF/models/R1-Distill-Llama-8B-SFT-cotroller_dataset-openmath-1m-all_cotif-ood-v7
+# output_dir: /disk/u/harshraj/CotIF/models/R1-Distill-Llama-8B-SFT-cotroller_dataset-bespoke-52k_all_cotif-v6-w_partial_soln-w_change_of_thght
+output_dir: /disk/u/harshraj/CotIF/models/R1-Distill-Llama-8B-SFT-cotroller_dataset-bespoke-35k_all_cotif-w_partial_soln
+# output_dir: /disk/u/harshraj/CotIF/models/test
+
+# Dataset arguments
+dataset_id_or_path: /disk/u/harshraj/CotIF/data/Bespoke-Stratos-35k-llama3-hehe-partial_soln.json
+# dataset_id_or_path: /disk/u/harshraj/CotIF/data/Bespoke-Stratos-17k-llama3-hehe-partial_soln-change_of_thought.json
+# dataset_id_or_path: /disk/u/harshraj/CotIF/data/cotroller_dataset-openthoughts_1m_all_cotif-ood-v7.json
+# dataset_id_or_path: /disk/u/harshraj/CotIF/data/cotroller_dataset-openmath-1m-all_cotif-v6.json
+# dataset_id_or_path: /disk/u/harshraj/CotIF/data/cotroller_dataset-bespoke_mix-52k_all_cotif-v6.json
+# dataset_id_or_path: /disk/u/harshraj/CotIF/data/cotroller_dataset-bespoke-52k_all_cotif-v6.json
+# dataset_id_or_path: /share/u/harshraj/CotIF/data-v2/cotroller_dataset-mix-wo_translation-v5.json
+max_seq_length: 10000
+packing: true
+
+# Training arguments
+# num_samples: 100 # Uncomment to use a subset of data for testing
+num_train_epochs: 1
+# max_steps: 10
+# max_steps: 10 # Uncomment to limit the number of steps 
+per_device_train_batch_size: 4  # Reduced batch size for full fine-tuning
+gradient_accumulation_steps: 2  # Increased for similar effective batch size
+gradient_checkpointing: true
+gradient_checkpointing_kwargs:
+  use_reentrant: false
+learning_rate: 2.0e-5  # Higher learning rate for full fine-tuning
+weight_decay: 0.01     # Added weight decay for regularization
+lr_scheduler_type: cosine  # Changed to cosine for better convergence
+warmup_ratio: 0.05     # Slightly increased warmup
+
+# Optimizer settings
+optim: adamw_torch
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_epsilon: 1.0e-8
+
+# DeepSpeed configuration (optional - uncomment if using DeepSpeed)
+# deepspeed:
+#   zero_stage: 3
+#   offload_optimizer:
+#     device: cpu
+#     pin_memory: true
+#   offload_param:
+#     device: cpu
+#     pin_memory: true
+#   zero3_init_flag: true
+#   zero3_save_16bit_model: true
+
+# Logging arguments
+logging_strategy: steps
+logging_steps: 5
+save_strategy: "epoch"
+save_total_limit: 3  # Keep only the last 3 checkpoints to save disk space
+report_to:
+- tensorboard
+seed: 42
+
+# Hugging Face Hub 
+push_to_hub: false
+# hub_model_id: deepseek-r1-8b-full-ft  # if not defined same as output_dir
+hub_strategy: every_save
